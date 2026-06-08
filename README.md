@@ -10,7 +10,8 @@ This package is inspired by SwiftyGyaim's required spec workflow and is intended
 - Checks area spec freshness before `git commit`
 - Suggests candidate specs for unlinked source files so spec `Trigger:` lists can grow with development
 - Prompts the agent to consider whether missing recommended docs are needed
-- Reminds on fix/bugfix/hotfix branches to record reusable bug knowledge before commit
+- Blocks source edits / commits on fix-like branches until bug memory files are added
+- Reminds on non-main branches to consider ADRs, with project-configurable strong signals
 - Records local metrics to `.pi/metrics/context-workflow.jsonl`
 - Provides commands:
   - `/spec-check`
@@ -103,7 +104,12 @@ It checks:
 
 `docs/specs/bug-memory.md` is treated as a bug memory index and operating guide, not as a normal area spec for every edit. Even if it has a broad trigger for human readability, the extension excludes it and `docs/specs/bugs/` entries from normal source-file matching to avoid noisy reminders.
 
-On branches whose name indicates bug fixing (`fix`, `bugfix`, `hotfix`, `bug`, `regression`), `/spec-check` and pre-commit reminders ask the agent to decide whether reusable bug knowledge should be recorded.
+On branches whose name indicates bug fixing (`fix`, `bugfix`, `hotfix`, `bug`, `regression`), the extension applies a deterministic gate:
+
+- source file edits are blocked until a changed `docs/specs/bugs/BUG-*.md` exists
+- `git commit` is blocked until a changed `docs/specs/bugs/BUG-*.md` and a changed `docs/specs/bug-memory.md` index exist
+
+This prevents bug memory from depending on LLM judgment alone.
 
 Recommended structure:
 
@@ -116,6 +122,36 @@ docs/specs/
 ```
 
 `bug-memory.md` should keep the index and format. Individual bug details should live in `docs/specs/bugs/BUG-XXX-short-title.md`.
+
+## ADR reminder
+
+ADR creation is advisory, not blocking. On non-main branches, `/spec-check` and pre-commit reminders ask whether important design decisions, trade-offs, or future constraints should be recorded in `docs/adr/ADR-XXX-title.md`.
+
+Some changes deserve a stronger reminder. Because these signals are project-specific, define them in `.pi/context-workflow.json`. If no config exists, built-in generic defaults are used.
+
+Example:
+
+```json
+{
+  "adr": {
+    "enabled": true,
+    "branchIgnorePatterns": ["^main$", "^master$", "^develop$"],
+    "strongSignals": [
+      { "name": "architecture docs", "patterns": ["^docs/architecture\\.md$", "^docs/data-design\\.md$"] },
+      { "name": "package/dependency changes", "patterns": ["^Package\\.swift$"] },
+      { "name": "migration changes", "patterns": ["Migrations", "Migration"] },
+      { "name": "auth/oauth/security/storage areas", "patterns": ["auth", "oauth", "oidc", "security", "storage", "persistence"] },
+      { "name": "public route/api changes", "patterns": ["routes?\\.swift$", "Controller", "Route"] }
+    ]
+  },
+  "bugMemory": {
+    "enforce": true,
+    "branchPatterns": ["(^|[\\\\/_-])(fix|bugfix|hotfix|bug|regression)([\\\\/_-]|$)"]
+  }
+}
+```
+
+`patterns` are regular expressions matched against changed file paths or branch names.
 
 ## Metrics
 
@@ -140,6 +176,5 @@ Current defaults:
 - specs directory: `docs/specs`
 - bug memory index: `docs/specs/bug-memory.md`
 - bug detail directory: `docs/specs/bugs`
+- optional project config: `.pi/context-workflow.json`
 - metrics file: `.pi/metrics/context-workflow.jsonl`
-
-Future versions can add project configuration.

@@ -27,7 +27,9 @@ type Metric = {
 		| "spec_check"
 		| "prerequisite_check"
 		| "doctor_check"
-		| "bug_memory_reminder";
+		| "bug_memory_reminder"
+		| "bug_memory_gate"
+		| "adr_reminder";
 	reason: Reason | "session_start" | "tool_doctor";
 	target?: string;
 	branch?: string;
@@ -40,11 +42,38 @@ type Metric = {
 	message: string;
 };
 
+type PatternRule = {
+	name: string;
+	patterns: string[];
+};
+
+type WorkflowConfig = {
+	adr?: {
+		enabled?: boolean;
+		branchIgnorePatterns?: string[];
+		strongSignals?: PatternRule[];
+	};
+	bugMemory?: {
+		enforce?: boolean;
+		branchPatterns?: string[];
+	};
+};
+
 const sourceExtensions = [".swift"];
 const specsDirectory = path.join("docs", "specs");
 const bugMemoryRelativePath = path.join(specsDirectory, "bug-memory.md");
 const bugsDirectory = path.join(specsDirectory, "bugs");
 const metricsRelativePath = path.join(".pi", "metrics", "context-workflow.jsonl");
+const configRelativePath = path.join(".pi", "context-workflow.json");
+const defaultBugfixBranchPatterns = ["(^|[\\/_-])(fix|bugfix|hotfix|bug|regression)([\\/_-]|$)"];
+const defaultAdrBranchIgnorePatterns = ["^main$", "^master$", "^develop$", "^HEAD$"];
+const defaultAdrStrongSignals: PatternRule[] = [
+	{ name: "architecture docs", patterns: ["^docs/architecture\\.md$", "^docs/.*/architecture.*\\.md$", "^docs/data-design\\.md$"] },
+	{ name: "package/dependency changes", patterns: ["^Package\\.swift$", "^package\\.json$", "^pyproject\\.toml$", "^Cargo\\.toml$"] },
+	{ name: "migration changes", patterns: ["Migration", "Migrations", "migrations"] },
+	{ name: "auth/oauth/security/storage areas", patterns: ["auth", "oauth", "oidc", "security", "storage", "persistence", "redis", "dynamodb"] },
+	{ name: "public route/api changes", patterns: ["routes?\\.swift$", "Controller", "Route", "OpenAPI", "api"] },
+];
 const recommendedProjectDocs = [
 	"README.md",
 	"AGENTS.md",
@@ -88,6 +117,12 @@ export default function (pi: ExtensionAPI) {
 		if (event.toolName === "edit" || event.toolName === "write") {
 			const targetPath = String((event.input as { path?: unknown }).path ?? "");
 			if (isSourceFile(targetPath)) {
+				const bugGate = buildBugMemoryGate(targetPath, event.toolName === "edit" ? "before_edit" : "before_write");
+				if (bugGate) {
+					writeMetric(bugGate.metric);
+					return { block: true, reason: bugGate.message };
+				}
+
 				const result = buildEditReminder(targetPath, event.toolName === "edit" ? "before_edit" : "before_write");
 				if (result) {
 					writeMetric(result.metric);
@@ -99,8 +134,15 @@ export default function (pi: ExtensionAPI) {
 		if (event.toolName === "bash") {
 			const command = String((event.input as { command?: unknown }).command ?? "");
 			if (/^\s*git\s+commit\b/.test(command)) {
+				const bugGate = buildBugMemoryGate(undefined, "before_commit");
+				if (bugGate) {
+					writeMetric(bugGate.metric);
+					return { block: true, reason: bugGate.message };
+				}
+
 				const result = buildCommitReminder("before_commit");
 				const bugMemory = buildBugMemoryReminder("before_commit");
+				const adr = buildAdrReminder("before_commit");
 				if (result) {
 					writeMetric(result.metric);
 					if (ctx.hasUI) ctx.ui.notify(result.message, "warning");
@@ -108,6 +150,10 @@ export default function (pi: ExtensionAPI) {
 				if (bugMemory) {
 					writeMetric(bugMemory.metric);
 					if (ctx.hasUI) ctx.ui.notify(bugMemory.message, "warning");
+				}
+				if (adr) {
+					writeMetric(adr.metric);
+					if (ctx.hasUI) ctx.ui.notify(adr.message, "warning");
 				}
 			}
 		}
@@ -121,11 +167,13 @@ export default function (pi: ExtensionAPI) {
 			const prerequisite = buildPrerequisiteReminder("manual_check");
 			const result = buildCommitReminder("manual_check");
 			const bugMemory = buildBugMemoryReminder("manual_check");
+			const adr = buildAdrReminder("manual_check");
 			if (prerequisite) writeMetric({ ...prerequisite.metric, event: "spec_check", reason: "manual_check" });
 			if (result) writeMetric({ ...result.metric, event: "spec_check", reason: "manual_check" });
 			if (bugMemory) writeMetric({ ...bugMemory.metric, event: "spec_check", reason: "manual_check" });
+			if (adr) writeMetric({ ...adr.metric, event: "spec_check", reason: "manual_check" });
 
-			const messages = [prerequisite?.message, result?.message, bugMemory?.message].filter(Boolean);
+			const messages = [prerequisite?.message, result?.message, bugMemory?.message, adr?.message].filter(Boolean);
 			if (messages.length > 0) {
 				ctx.ui.notify(messages.join("\n\n"), "info");
 			} else {
@@ -151,6 +199,31 @@ function repoRoot(): string | undefined {
 	} catch {
 		return undefined;
 	}
+}
+
+function loadConfig(root: string): WorkflowConfig {
+	const configPath = path.join(root, configRelativePath);
+	if (!fs.existsSync(configPath)) return {};
+	try {
+		return JSON.parse(fs.readFileSync(configPath, "utf8")) as WorkflowConfig;
+	} catch {
+		return {};
+	}
+}
+
+function matchesAnyPattern(value: string, patterns: string[]): boolean {
+	return patterns.some((pattern) => {
+		try {
+			return new RegExp(pattern, "i").test(value);
+		} catch {
+			return value.includes(pattern);
+		}
+	});
+}
+
+function isIgnoredAdrBranch(branch: string | undefined, config: WorkflowConfig): boolean {
+	if (!branch) return true;
+	return matchesAnyPattern(branch, config.adr?.branchIgnorePatterns ?? defaultAdrBranchIgnorePatterns);
 }
 
 function isSourceFile(filePath: string): boolean {
@@ -369,9 +442,88 @@ function currentBranch(): string | undefined {
 	}
 }
 
-function isBugfixBranch(branch: string | undefined): boolean {
+function isBugfixBranch(branch: string | undefined, config: WorkflowConfig): boolean {
 	if (!branch || branch === "HEAD") return false;
-	return /(^|[\/_-])(fix|bugfix|hotfix|bug|regression)([\/_-]|$)/i.test(branch);
+	return matchesAnyPattern(branch, config.bugMemory?.branchPatterns ?? defaultBugfixBranchPatterns);
+}
+
+function changedBugDetailFiles(files: string[]): string[] {
+	return files.filter((file) => file.startsWith(`${bugsDirectory}/BUG-`) && file.endsWith(".md"));
+}
+
+function buildBugMemoryGate(
+	targetPath: string | undefined,
+	reason: "before_edit" | "before_write" | "before_commit",
+): { message: string; metric: Metric } | undefined {
+	const root = repoRoot();
+	if (!root) return undefined;
+
+	const config = loadConfig(root);
+	if (config.bugMemory?.enforce === false) return undefined;
+
+	const branch = currentBranch();
+	if (!isBugfixBranch(branch, config)) return undefined;
+
+	const changed = changedFiles();
+	const bugDetails = changedBugDetailFiles(changed);
+	const indexChanged = changed.includes(bugMemoryRelativePath);
+	const changedSourceFiles = changed.filter(isSourceFile);
+
+	let message: string | undefined;
+	if (reason === "before_commit") {
+		if (bugDetails.length === 0 || !indexChanged) {
+			message = `[Bug Memory Gate] ${branch} は bugfix 系ブランチです。commit 前に ${bugsDirectory}/BUG-XXX-short-title.md の追加/更新と ${bugMemoryRelativePath} の index 更新が必要です。`;
+		}
+	} else if (bugDetails.length === 0) {
+		message = `[Bug Memory Gate] ${branch} は bugfix 系ブランチです。source を編集する前に ${bugsDirectory}/BUG-XXX-short-title.md を作成してください。`;
+	}
+
+	if (!message) return undefined;
+	return {
+		message,
+		metric: {
+			timestamp: new Date().toISOString(),
+			event: "bug_memory_gate",
+			reason,
+			target: targetPath,
+			branch,
+			changedSourceFiles,
+			message,
+		},
+	};
+}
+
+function buildAdrReminder(reason: "before_commit" | "manual_check"): { message: string; metric: Metric } | undefined {
+	const root = repoRoot();
+	if (!root) return undefined;
+
+	const config = loadConfig(root);
+	if (config.adr?.enabled === false) return undefined;
+
+	const branch = currentBranch();
+	if (isIgnoredAdrBranch(branch, config)) return undefined;
+
+	const changed = changedFiles();
+	if (changed.length === 0) return undefined;
+
+	const rules = config.adr?.strongSignals ?? defaultAdrStrongSignals;
+	const matchedSignals = rules
+		.filter((rule) => changed.some((file) => matchesAnyPattern(file, rule.patterns)))
+		.map((rule) => rule.name);
+	const strength = matchedSignals.length > 0 ? `特に ${matchedSignals.join(", ")} に関わる変更があります。` : "";
+	const message = `[ADR Reminder] branch ${branch} で作業中です。重要な設計判断・トレードオフ・将来の制約があるなら docs/adr/ADR-XXX-title.md を作成してください。${strength} spec 更新で十分な変更なら ADR 不要と判断して進めてください。`;
+
+	return {
+		message,
+		metric: {
+			timestamp: new Date().toISOString(),
+			event: "adr_reminder",
+			reason,
+			branch,
+			changedSourceFiles: changed.filter(isSourceFile),
+			message,
+		},
+	};
 }
 
 function buildBugMemoryReminder(
@@ -380,6 +532,7 @@ function buildBugMemoryReminder(
 	const root = repoRoot();
 	if (!root) return undefined;
 
+	const config = loadConfig(root);
 	const branch = currentBranch();
 	const changed = changedFiles();
 	const changedSourceFiles = changed.filter(isSourceFile);
@@ -387,7 +540,7 @@ function buildBugMemoryReminder(
 		(file) => file === bugMemoryRelativePath || file.startsWith(`${bugsDirectory}/`),
 	);
 
-	if (!isBugfixBranch(branch)) return undefined;
+	if (!isBugfixBranch(branch, config)) return undefined;
 	if (bugMemoryChanged) return undefined;
 
 	const message = `[Bug Memory] fix/bugfix/hotfix 系ブランチ (${branch}) で作業中です。作業完了前に、再発防止に役立つ知見があれば ${bugsDirectory}/BUG-XXX-short-title.md に記録し、${bugMemoryRelativePath} の index を更新してください。不要なら「新しい再発防止知見なし」と判断して進めてください。`;
@@ -456,6 +609,13 @@ function buildDoctorReport(): { ok: boolean; missingPrerequisites: string[]; mes
 		}
 	}
 
+	const workflowConfigPath = path.join(root, configRelativePath);
+	if (fs.existsSync(workflowConfigPath)) {
+		lines.push(`- ✅ workflow config: ${configRelativePath} present`);
+	} else {
+		lines.push(`- ℹ️ workflow config: ${configRelativePath} not found. Built-in defaults will be used.`);
+	}
+
 	const settingsPath = path.join(root, ".pi", "settings.json");
 	if (fs.existsSync(settingsPath)) {
 		lines.push("- ✅ project pi settings: .pi/settings.json present");
@@ -468,7 +628,11 @@ function buildDoctorReport(): { ok: boolean; missingPrerequisites: string[]; mes
 }
 
 function changedFiles(): string[] {
-	const commands = ["git diff --cached --name-only --diff-filter=ACMR", "git diff --name-only --diff-filter=ACMR"];
+	const commands = [
+		"git diff --cached --name-only --diff-filter=ACMR",
+		"git diff --name-only --diff-filter=ACMR",
+		"git ls-files --others --exclude-standard",
+	];
 	const files = new Set<string>();
 	for (const command of commands) {
 		try {
@@ -520,6 +684,8 @@ function buildMetricsSummary(): string {
 	const doctorCheckCount = metrics.filter((m) => m.event === "doctor_check").length;
 	const prerequisiteCheckCount = metrics.filter((m) => m.event === "prerequisite_check").length;
 	const bugMemoryReminderCount = metrics.filter((m) => m.event === "bug_memory_reminder").length;
+	const bugMemoryGateCount = metrics.filter((m) => m.event === "bug_memory_gate").length;
+	const adrReminderCount = metrics.filter((m) => m.event === "adr_reminder").length;
 	const missingPrerequisiteCount = metrics.filter((m) => (m.missingPrerequisites ?? []).length > 0).length;
 	const missingSpecCount = metrics.filter((m) => m.missingSpec).length;
 	const staleSpecCount = metrics.filter((m) => (m.staleSpecs ?? []).length > 0).length;
@@ -534,6 +700,8 @@ function buildMetricsSummary(): string {
 		`- doctor checks: ${doctorCheckCount}`,
 		`- prerequisite checks: ${prerequisiteCheckCount}`,
 		`- bug memory reminders: ${bugMemoryReminderCount}`,
+		`- bug memory gates: ${bugMemoryGateCount}`,
+		`- ADR reminders: ${adrReminderCount}`,
 		`- missing prerequisite events: ${missingPrerequisiteCount}`,
 		`- missing spec events: ${missingSpecCount}`,
 		`- stale spec events: ${staleSpecCount}`,
