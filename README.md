@@ -79,7 +79,7 @@ It checks:
 - the extension is loaded
 - Git repository root can be detected
 - baseline docs exist
-- specs have `> Trigger:` and `> Last updated:` headers
+- spec files, excluding `docs/specs/README.md`, have `> Trigger:` and `> Last updated:` headers
 - metrics directory is writable
 - `.pi/settings.json` exists for project-scope usage
 

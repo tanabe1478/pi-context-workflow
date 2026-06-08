@@ -159,7 +159,7 @@ function loadSpecs(root: string): SpecInfo[] {
 
 	return fs
 		.readdirSync(specsDir)
-		.filter((name) => name.endsWith(".md"))
+		.filter((name) => name.endsWith(".md") && name !== "README.md")
 		.map((name) => {
 			const fullPath = path.join(specsDir, name);
 			const content = fs.readFileSync(fullPath, "utf8");
