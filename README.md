@@ -14,6 +14,8 @@ This package is inspired by SwiftyGyaim's required spec workflow and is intended
   - `/spec-check`
   - `/spec-metrics`
   - `/context-workflow-doctor`
+- Provides an agent-callable tool:
+  - `context_workflow_doctor`
 
 ## Recommended project docs
 
@@ -66,13 +68,21 @@ Or add to `.pi/settings.json` manually:
 
 Then run `/reload` in pi.
 
-## Doctor command
+## Doctor command / tool
 
 Run this after installing or reloading the package:
 
 ```text
 /context-workflow-doctor
 ```
+
+For agent-driven diagnosis, ask the agent to use the tool:
+
+```text
+context_workflow_doctor
+```
+
+This lets the agent inspect the result directly instead of asking the user to paste slash-command output.
 
 It checks:
 

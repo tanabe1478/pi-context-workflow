@@ -5,6 +5,7 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { execSync } from "node:child_process";
@@ -21,7 +22,7 @@ type Reason = "before_edit" | "before_write" | "before_commit" | "manual_check";
 type Metric = {
 	timestamp: string;
 	event: "spec_reminder" | "spec_freshness" | "spec_check" | "prerequisite_check" | "doctor_check";
-	reason: Reason | "session_start" | "manual_doctor";
+	reason: Reason | "session_start" | "manual_doctor" | "tool_doctor";
 	target?: string;
 	changedSourceFiles?: string[];
 	matchedSpecs?: string[];
@@ -43,6 +44,28 @@ const recommendedProjectDocs = [
 ];
 
 export default function (pi: ExtensionAPI) {
+	pi.registerTool({
+		name: "context_workflow_doctor",
+		label: "Context Workflow Doctor",
+		description:
+			"Diagnose whether pi-context-workflow is set up correctly in the current project. Use when the user asks to check context workflow setup, verify docs/spec workflow, or inspect doctor results without asking the user to paste slash-command output.",
+		parameters: Type.Object({}),
+		async execute() {
+			const report = buildDoctorReport();
+			writeMetric({
+				timestamp: new Date().toISOString(),
+				event: "doctor_check",
+				reason: "tool_doctor",
+				missingPrerequisites: report.missingPrerequisites,
+				message: report.message,
+			});
+			return {
+				content: [{ type: "text", text: report.message }],
+				details: report,
+			};
+		},
+	});
+
 	pi.on("session_start", async (_event, ctx) => {
 		const result = buildPrerequisiteReminder("session_start");
 		if (result) {
