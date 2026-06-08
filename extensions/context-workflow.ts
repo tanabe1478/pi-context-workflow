@@ -22,7 +22,7 @@ type Reason = "before_edit" | "before_write" | "before_commit" | "manual_check";
 type Metric = {
 	timestamp: string;
 	event: "spec_reminder" | "spec_freshness" | "spec_check" | "prerequisite_check" | "doctor_check";
-	reason: Reason | "session_start" | "manual_doctor" | "tool_doctor";
+	reason: Reason | "session_start" | "tool_doctor";
 	target?: string;
 	changedSourceFiles?: string[];
 	matchedSpecs?: string[];
@@ -126,20 +126,6 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
-	pi.registerCommand("context-workflow-doctor", {
-		description: "Diagnose whether pi-context-workflow is set up correctly in this project",
-		handler: async (_args, ctx) => {
-			const report = buildDoctorReport();
-			writeMetric({
-				timestamp: new Date().toISOString(),
-				event: "doctor_check",
-				reason: "manual_doctor",
-				missingPrerequisites: report.missingPrerequisites,
-				message: report.message,
-			});
-			ctx.ui.notify(report.message, report.ok ? "info" : "warning");
-		},
-	});
 }
 
 function repoRoot(): string | undefined {
