@@ -8,10 +8,25 @@ This package is inspired by SwiftyGyaim's required spec workflow and is intended
 
 - Reminds before editing source files to read related `docs/specs/*.md`
 - Checks spec freshness before `git commit`
+- Prompts creation of recommended project docs when missing
 - Records local metrics to `.pi/metrics/context-workflow.jsonl`
 - Provides commands:
   - `/spec-check`
   - `/spec-metrics`
+
+## Recommended project docs
+
+The extension checks for these baseline docs and prompts their creation when missing:
+
+```text
+README.md
+AGENTS.md
+docs/specs/README.md
+docs/specs/bug-memory.md
+docs/specs/project-setup.md
+```
+
+These names are intentionally simple defaults. Future versions can add project configuration.
 
 ## How specs are discovered
 

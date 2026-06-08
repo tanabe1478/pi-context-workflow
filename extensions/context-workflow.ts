@@ -20,12 +20,13 @@ type Reason = "before_edit" | "before_write" | "before_commit" | "manual_check";
 
 type Metric = {
 	timestamp: string;
-	event: "spec_reminder" | "spec_freshness" | "spec_check";
-	reason: Reason;
+	event: "spec_reminder" | "spec_freshness" | "spec_check" | "prerequisite_check";
+	reason: Reason | "session_start";
 	target?: string;
 	changedSourceFiles?: string[];
 	matchedSpecs?: string[];
 	missingSpec?: boolean;
+	missingPrerequisites?: string[];
 	staleSpecs?: string[];
 	message: string;
 };
@@ -33,8 +34,23 @@ type Metric = {
 const sourceExtensions = [".swift"];
 const specsDirectory = path.join("docs", "specs");
 const metricsRelativePath = path.join(".pi", "metrics", "context-workflow.jsonl");
+const recommendedProjectDocs = [
+	"README.md",
+	"AGENTS.md",
+	path.join("docs", "specs", "README.md"),
+	path.join("docs", "specs", "bug-memory.md"),
+	path.join("docs", "specs", "project-setup.md"),
+];
 
 export default function (pi: ExtensionAPI) {
+	pi.on("session_start", async (_event, ctx) => {
+		const result = buildPrerequisiteReminder("session_start");
+		if (result) {
+			writeMetric(result.metric);
+			if (ctx.hasUI) ctx.ui.notify(result.message, "warning");
+		}
+	});
+
 	pi.on("tool_call", async (event, ctx) => {
 		if (event.toolName === "edit" || event.toolName === "write") {
 			const targetPath = String((event.input as { path?: unknown }).path ?? "");
@@ -62,14 +78,18 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("spec-check", {
-		description: "Check changed source files and related docs/specs freshness",
+		description: "Check required docs, changed source files, and related docs/specs freshness",
 		handler: async (_args, ctx) => {
+			const prerequisite = buildPrerequisiteReminder("manual_check");
 			const result = buildCommitReminder("manual_check");
-			if (result) {
-				writeMetric({ ...result.metric, event: "spec_check", reason: "manual_check" });
-				ctx.ui.notify(result.message, "info");
+			if (prerequisite) writeMetric({ ...prerequisite.metric, event: "spec_check", reason: "manual_check" });
+			if (result) writeMetric({ ...result.metric, event: "spec_check", reason: "manual_check" });
+
+			const messages = [prerequisite?.message, result?.message].filter(Boolean);
+			if (messages.length > 0) {
+				ctx.ui.notify(messages.join("\n\n"), "info");
 			} else {
-				const message = "変更された source file、または対応する spec は見つかりませんでした。";
+				const message = "必要な基礎 docs は揃っています。変更された source file、または対応する spec は見つかりませんでした。";
 				writeMetric({ timestamp: new Date().toISOString(), event: "spec_check", reason: "manual_check", message });
 				ctx.ui.notify(message, "info");
 			}
@@ -94,6 +114,28 @@ function repoRoot(): string | undefined {
 
 function isSourceFile(filePath: string): boolean {
 	return sourceExtensions.some((ext) => filePath.endsWith(ext));
+}
+
+function buildPrerequisiteReminder(
+	reason: "session_start" | "manual_check",
+): { message: string; metric: Metric } | undefined {
+	const root = repoRoot();
+	if (!root) return undefined;
+
+	const missing = recommendedProjectDocs.filter((relativePath) => !fs.existsSync(path.join(root, relativePath)));
+	if (missing.length === 0) return undefined;
+
+	const message = `[Context Workflow] 推奨 docs が不足しています: ${missing.join(", ")}。実装前に README / AGENTS / docs/specs/README / bug-memory / project-setup を整備してください。`;
+	return {
+		message,
+		metric: {
+			timestamp: new Date().toISOString(),
+			event: "prerequisite_check",
+			reason,
+			missingPrerequisites: missing,
+			message,
+		},
+	};
 }
 
 function loadSpecs(root: string): SpecInfo[] {
@@ -286,6 +328,8 @@ function buildMetricsSummary(): string {
 	const reminderCount = metrics.filter((m) => m.event === "spec_reminder").length;
 	const freshnessCount = metrics.filter((m) => m.event === "spec_freshness").length;
 	const manualCheckCount = metrics.filter((m) => m.event === "spec_check").length;
+	const prerequisiteCheckCount = metrics.filter((m) => m.event === "prerequisite_check").length;
+	const missingPrerequisiteCount = metrics.filter((m) => (m.missingPrerequisites ?? []).length > 0).length;
 	const missingSpecCount = metrics.filter((m) => m.missingSpec).length;
 	const staleSpecCount = metrics.filter((m) => (m.staleSpecs ?? []).length > 0).length;
 	const last = metrics[metrics.length - 1];
@@ -296,6 +340,8 @@ function buildMetricsSummary(): string {
 		`- spec reminders: ${reminderCount}`,
 		`- freshness checks: ${freshnessCount}`,
 		`- manual checks: ${manualCheckCount}`,
+		`- prerequisite checks: ${prerequisiteCheckCount}`,
+		`- missing prerequisite events: ${missingPrerequisiteCount}`,
 		`- missing spec events: ${missingSpecCount}`,
 		`- stale spec events: ${staleSpecCount}`,
 		`- last event: ${last.timestamp} ${last.event} ${last.target ?? ""}`.trim(),
