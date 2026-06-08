@@ -21,11 +21,19 @@ type Reason = "before_edit" | "before_write" | "before_commit" | "manual_check";
 
 type Metric = {
 	timestamp: string;
-	event: "spec_reminder" | "spec_freshness" | "spec_check" | "prerequisite_check" | "doctor_check";
+	event:
+		| "spec_reminder"
+		| "spec_freshness"
+		| "spec_check"
+		| "prerequisite_check"
+		| "doctor_check"
+		| "bug_memory_reminder";
 	reason: Reason | "session_start" | "tool_doctor";
 	target?: string;
+	branch?: string;
 	changedSourceFiles?: string[];
 	matchedSpecs?: string[];
+	suggestedSpecs?: string[];
 	missingSpec?: boolean;
 	missingPrerequisites?: string[];
 	staleSpecs?: string[];
@@ -34,6 +42,8 @@ type Metric = {
 
 const sourceExtensions = [".swift"];
 const specsDirectory = path.join("docs", "specs");
+const bugMemoryRelativePath = path.join(specsDirectory, "bug-memory.md");
+const bugsDirectory = path.join(specsDirectory, "bugs");
 const metricsRelativePath = path.join(".pi", "metrics", "context-workflow.jsonl");
 const recommendedProjectDocs = [
 	"README.md",
@@ -90,9 +100,14 @@ export default function (pi: ExtensionAPI) {
 			const command = String((event.input as { command?: unknown }).command ?? "");
 			if (/^\s*git\s+commit\b/.test(command)) {
 				const result = buildCommitReminder("before_commit");
+				const bugMemory = buildBugMemoryReminder("before_commit");
 				if (result) {
 					writeMetric(result.metric);
 					if (ctx.hasUI) ctx.ui.notify(result.message, "warning");
+				}
+				if (bugMemory) {
+					writeMetric(bugMemory.metric);
+					if (ctx.hasUI) ctx.ui.notify(bugMemory.message, "warning");
 				}
 			}
 		}
@@ -105,10 +120,12 @@ export default function (pi: ExtensionAPI) {
 		handler: async (_args, ctx) => {
 			const prerequisite = buildPrerequisiteReminder("manual_check");
 			const result = buildCommitReminder("manual_check");
+			const bugMemory = buildBugMemoryReminder("manual_check");
 			if (prerequisite) writeMetric({ ...prerequisite.metric, event: "spec_check", reason: "manual_check" });
 			if (result) writeMetric({ ...result.metric, event: "spec_check", reason: "manual_check" });
+			if (bugMemory) writeMetric({ ...bugMemory.metric, event: "spec_check", reason: "manual_check" });
 
-			const messages = [prerequisite?.message, result?.message].filter(Boolean);
+			const messages = [prerequisite?.message, result?.message, bugMemory?.message].filter(Boolean);
 			if (messages.length > 0) {
 				ctx.ui.notify(messages.join("\n\n"), "info");
 			} else {
@@ -193,15 +210,48 @@ function parseTriggers(line: string | undefined): string[] {
 		.filter(Boolean);
 }
 
+function sourceSpecs(specs: SpecInfo[]): SpecInfo[] {
+	return specs.filter((spec) => spec.path !== bugMemoryRelativePath && !spec.path.startsWith(`${bugsDirectory}/`));
+}
+
 function matchingSpecs(specs: SpecInfo[], filePath: string): SpecInfo[] {
 	const base = path.basename(filePath);
 	const normalized = filePath.replace(/\\/g, "/");
-	return specs.filter((spec) =>
+	return sourceSpecs(specs).filter((spec) =>
 		spec.triggers.some((trigger) => {
 			if (trigger === "全ファイル" || trigger.includes("全ファイル")) return true;
 			return trigger === base || normalized.endsWith(trigger) || normalized.includes(trigger);
 		}),
 	);
+}
+
+function tokenize(value: string): string[] {
+	return value
+		.replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+		.toLowerCase()
+		.split(/[^a-z0-9]+/)
+		.filter((token) => token.length >= 3 && !["swift", "model", "tests", "test", "create"].includes(token));
+}
+
+function suggestSpecs(specs: SpecInfo[], filePath: string): SpecInfo[] {
+	const source = sourceSpecs(specs);
+	const fileTokens = new Set(tokenize(filePath));
+	if (fileTokens.size === 0) return [];
+
+	return source
+		.map((spec) => {
+			const haystack = [spec.name, spec.path, ...spec.triggers].join(" ");
+			const specTokens = new Set(tokenize(haystack));
+			let score = 0;
+			for (const token of fileTokens) {
+				if (specTokens.has(token)) score += 1;
+			}
+			return { spec, score };
+		})
+		.filter((item) => item.score > 0)
+		.sort((a, b) => b.score - a.score)
+		.slice(0, 3)
+		.map((item) => item.spec);
 }
 
 function buildEditReminder(
@@ -214,13 +264,15 @@ function buildEditReminder(
 	const specs = loadSpecs(root);
 	const matched = specs.length === 0 ? [] : matchingSpecs(specs, targetPath);
 	const matchedSpecs = matched.map((spec) => spec.path);
+	const suggestions = matchedSpecs.length === 0 ? suggestSpecs(specs, targetPath).map((spec) => spec.path) : [];
 	const missingSpec = matchedSpecs.length === 0;
 
 	let message: string;
 	if (specs.length === 0) {
 		message = `[Spec Reminder] ${targetPath} を編集する前に、領域 spec が必要か判断してください。必要なら ${specsDirectory}/ に領域 spec を作成し、不要なら既存 docs / code comment で十分な理由を持って進めてください。`;
 	} else if (missingSpec) {
-		message = `[Spec Reminder] ${targetPath} に対応する領域 spec が見つかりません。新しい振る舞い・制約・テスト観点を扱うなら ${specsDirectory}/ に領域 spec を追加してください。局所的な実装詳細だけなら code comment で十分か判断してください。`;
+		const suggestionText = suggestions.length > 0 ? ` 既存 spec に属するなら候補: ${suggestions.join(", ")}。Trigger 追加も検討してください。` : "";
+		message = `[Spec Reminder] ${targetPath} に対応する領域 spec が見つかりません。新しい振る舞い・制約・テスト観点を扱うなら ${specsDirectory}/ に領域 spec を追加してください。局所的な実装詳細だけなら code comment で十分か判断してください。${suggestionText}`;
 	} else {
 		message = `[Spec Reminder] ${targetPath} を編集する前に ${matchedSpecs.join(", ")} を読んでください。仕様変更時は同じ作業で spec も更新してください。`;
 	}
@@ -233,6 +285,7 @@ function buildEditReminder(
 			reason,
 			target: targetPath,
 			matchedSpecs,
+			suggestedSpecs: suggestions,
 			missingSpec,
 			message,
 		},
@@ -250,6 +303,7 @@ function buildCommitReminder(reason: "before_commit" | "manual_check"): { messag
 	const today = new Date().toISOString().slice(0, 10);
 	const checks: string[] = [];
 	const matchedSpecs = new Set<string>();
+	const suggestedSpecs = new Set<string>();
 	const staleSpecs = new Set<string>();
 	let missingSpec = false;
 
@@ -264,6 +318,7 @@ function buildCommitReminder(reason: "before_commit" | "manual_check"): { messag
 				reason,
 				changedSourceFiles,
 				matchedSpecs: [],
+				suggestedSpecs: [],
 				missingSpec,
 				staleSpecs: [],
 				message,
@@ -275,7 +330,10 @@ function buildCommitReminder(reason: "before_commit" | "manual_check"): { messag
 		const matched = matchingSpecs(specs, file);
 		if (matched.length === 0) {
 			missingSpec = true;
-			checks.push(`${file} -> 対応specなし`);
+			const suggestions = suggestSpecs(specs, file).map((spec) => spec.path);
+			for (const spec of suggestions) suggestedSpecs.add(spec);
+			const suggestionText = suggestions.length > 0 ? ` (候補: ${suggestions.join(", ")}; 必要なら Trigger に追加)` : "";
+			checks.push(`${file} -> 対応specなし${suggestionText}`);
 			continue;
 		}
 		for (const spec of matched) {
@@ -286,7 +344,7 @@ function buildCommitReminder(reason: "before_commit" | "manual_check"): { messag
 		}
 	}
 
-	const message = `[Spec Freshness] コミット前に確認: ${checks.join("; ")}。動作仕様を変更した場合は対応する領域 spec を同じコミットで更新してください。局所的な変更だけなら spec 更新不要と判断してよいです。バグ修正時は ${specsDirectory}/bug-memory.md に追記してください。`;
+	const message = `[Spec Freshness] コミット前に確認: ${checks.join("; ")}。動作仕様を変更した場合は対応する領域 spec を同じコミットで更新してください。局所的な変更だけなら spec 更新不要と判断してよいです。未紐づきファイルが既存領域に属するなら、対応 spec の Trigger 追加も検討してください。`;
 	return {
 		message,
 		metric: {
@@ -295,8 +353,52 @@ function buildCommitReminder(reason: "before_commit" | "manual_check"): { messag
 			reason,
 			changedSourceFiles,
 			matchedSpecs: [...matchedSpecs],
+			suggestedSpecs: [...suggestedSpecs],
 			missingSpec,
 			staleSpecs: [...staleSpecs],
+			message,
+		},
+	};
+}
+
+function currentBranch(): string | undefined {
+	try {
+		return execSync("git rev-parse --abbrev-ref HEAD", { encoding: "utf8" }).trim();
+	} catch {
+		return undefined;
+	}
+}
+
+function isBugfixBranch(branch: string | undefined): boolean {
+	if (!branch || branch === "HEAD") return false;
+	return /(^|[\/_-])(fix|bugfix|hotfix|bug|regression)([\/_-]|$)/i.test(branch);
+}
+
+function buildBugMemoryReminder(
+	reason: "before_commit" | "manual_check",
+): { message: string; metric: Metric } | undefined {
+	const root = repoRoot();
+	if (!root) return undefined;
+
+	const branch = currentBranch();
+	const changed = changedFiles();
+	const changedSourceFiles = changed.filter(isSourceFile);
+	const bugMemoryChanged = changed.some(
+		(file) => file === bugMemoryRelativePath || file.startsWith(`${bugsDirectory}/`),
+	);
+
+	if (!isBugfixBranch(branch)) return undefined;
+	if (bugMemoryChanged) return undefined;
+
+	const message = `[Bug Memory] fix/bugfix/hotfix 系ブランチ (${branch}) で作業中です。作業完了前に、再発防止に役立つ知見があれば ${bugsDirectory}/BUG-XXX-short-title.md に記録し、${bugMemoryRelativePath} の index を更新してください。不要なら「新しい再発防止知見なし」と判断して進めてください。`;
+	return {
+		message,
+		metric: {
+			timestamp: new Date().toISOString(),
+			event: "bug_memory_reminder",
+			reason,
+			branch,
+			changedSourceFiles,
 			message,
 		},
 	};
@@ -417,6 +519,7 @@ function buildMetricsSummary(): string {
 	const manualCheckCount = metrics.filter((m) => m.event === "spec_check").length;
 	const doctorCheckCount = metrics.filter((m) => m.event === "doctor_check").length;
 	const prerequisiteCheckCount = metrics.filter((m) => m.event === "prerequisite_check").length;
+	const bugMemoryReminderCount = metrics.filter((m) => m.event === "bug_memory_reminder").length;
 	const missingPrerequisiteCount = metrics.filter((m) => (m.missingPrerequisites ?? []).length > 0).length;
 	const missingSpecCount = metrics.filter((m) => m.missingSpec).length;
 	const staleSpecCount = metrics.filter((m) => (m.staleSpecs ?? []).length > 0).length;
@@ -430,6 +533,7 @@ function buildMetricsSummary(): string {
 		`- manual checks: ${manualCheckCount}`,
 		`- doctor checks: ${doctorCheckCount}`,
 		`- prerequisite checks: ${prerequisiteCheckCount}`,
+		`- bug memory reminders: ${bugMemoryReminderCount}`,
 		`- missing prerequisite events: ${missingPrerequisiteCount}`,
 		`- missing spec events: ${missingSpecCount}`,
 		`- stale spec events: ${staleSpecCount}`,

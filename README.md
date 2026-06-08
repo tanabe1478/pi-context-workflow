@@ -8,7 +8,9 @@ This package is inspired by SwiftyGyaim's required spec workflow and is intended
 
 - Reminds before editing source files to read related area specs in `docs/specs/*.md`
 - Checks area spec freshness before `git commit`
+- Suggests candidate specs for unlinked source files so spec `Trigger:` lists can grow with development
 - Prompts the agent to consider whether missing recommended docs are needed
+- Reminds on fix/bugfix/hotfix branches to record reusable bug knowledge before commit
 - Records local metrics to `.pi/metrics/context-workflow.jsonl`
 - Provides commands:
   - `/spec-check`
@@ -58,6 +60,8 @@ Each spec may declare triggers in the first few lines:
 
 The extension matches edited files by basename or path fragment. Multiple files can and should point to the same area spec.
 
+When a changed source file has no matching trigger, the extension uses a lightweight filename/path token heuristic to suggest existing candidate specs. If the file belongs to an existing area, add the file name or path fragment to that spec's `Trigger:` line. This is advisory; do not add triggers mechanically for temporary helpers or files whose behavior is local and sufficiently documented in code comments.
+
 ## Install in a project
 
 From a project root:
@@ -95,6 +99,24 @@ It checks:
 - metrics directory is writable
 - `.pi/settings.json` exists for project-scope usage
 
+## Bug memory
+
+`docs/specs/bug-memory.md` is treated as a bug memory index and operating guide, not as a normal area spec for every edit. Even if it has a broad trigger for human readability, the extension excludes it and `docs/specs/bugs/` entries from normal source-file matching to avoid noisy reminders.
+
+On branches whose name indicates bug fixing (`fix`, `bugfix`, `hotfix`, `bug`, `regression`), `/spec-check` and pre-commit reminders ask the agent to decide whether reusable bug knowledge should be recorded.
+
+Recommended structure:
+
+```text
+docs/specs/
+├── bug-memory.md
+└── bugs/
+    ├── BUG-001-short-title.md
+    └── BUG-002-another-title.md
+```
+
+`bug-memory.md` should keep the index and format. Individual bug details should live in `docs/specs/bugs/BUG-XXX-short-title.md`.
+
 ## Metrics
 
 Metrics are written locally and should usually not be committed:
@@ -116,6 +138,8 @@ Current defaults:
 
 - source files: `.swift`
 - specs directory: `docs/specs`
+- bug memory index: `docs/specs/bug-memory.md`
+- bug detail directory: `docs/specs/bugs`
 - metrics file: `.pi/metrics/context-workflow.jsonl`
 
 Future versions can add project configuration.
