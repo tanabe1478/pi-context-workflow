@@ -13,6 +13,7 @@ import {
 	buildAdrReminder as coreBuildAdrReminder,
 	buildBugMemoryGate as coreBuildBugMemoryGate,
 	isBugfixBranch as coreIsBugfixBranch,
+	isSourceFile as coreIsSourceFile,
 	matchingSpecs as coreMatchingSpecs,
 	matchesAnyPattern as coreMatchesAnyPattern,
 	sourceSpecs as coreSourceSpecs,
@@ -57,6 +58,9 @@ type PatternRule = {
 };
 
 type WorkflowConfig = {
+	source?: {
+		extensions?: string[];
+	};
 	adr?: {
 		enabled?: boolean;
 		branchIgnorePatterns?: string[];
@@ -68,7 +72,7 @@ type WorkflowConfig = {
 	};
 };
 
-const sourceExtensions = [".swift"];
+const defaultSourceExtensions = [".swift"];
 const specsDirectory = path.join("docs", "specs");
 const bugMemoryRelativePath = path.join(specsDirectory, "bug-memory.md");
 const bugsDirectory = path.join(specsDirectory, "bugs");
@@ -125,7 +129,8 @@ export default function (pi: ExtensionAPI) {
 	pi.on("tool_call", async (event, ctx) => {
 		if (event.toolName === "edit" || event.toolName === "write") {
 			const targetPath = String((event.input as { path?: unknown }).path ?? "");
-			if (isSourceFile(targetPath)) {
+			const root = repoRoot();
+			if (isSourceFile(targetPath, root)) {
 				const bugGate = buildBugMemoryGate(targetPath, event.toolName === "edit" ? "before_edit" : "before_write");
 				if (bugGate) {
 					writeMetric(bugGate.metric);
@@ -229,8 +234,8 @@ function isIgnoredAdrBranch(branch: string | undefined, config: WorkflowConfig):
 	return matchesAnyPattern(branch, config.adr?.branchIgnorePatterns ?? defaultAdrBranchIgnorePatterns);
 }
 
-function isSourceFile(filePath: string): boolean {
-	return sourceExtensions.some((ext) => filePath.endsWith(ext));
+function isSourceFile(filePath: string, root: string | undefined = repoRoot()): boolean {
+	return coreIsSourceFile(filePath, root ? loadConfig(root) : { source: { extensions: defaultSourceExtensions } });
 }
 
 function buildPrerequisiteReminder(
@@ -348,7 +353,7 @@ function buildCommitReminder(reason: "before_commit" | "manual_check"): { messag
 	const root = repoRoot();
 	if (!root) return undefined;
 
-	const changedSourceFiles = changedFiles().filter(isSourceFile);
+	const changedSourceFiles = changedFiles().filter((file) => isSourceFile(file, root));
 	if (changedSourceFiles.length === 0) return undefined;
 
 	const specs = loadSpecs(root);
@@ -439,7 +444,7 @@ function buildBugMemoryGate(
 	const config = loadConfig(root);
 	const branch = currentBranch();
 	const changed = changedFiles();
-	const changedSourceFiles = changed.filter(isSourceFile);
+	const changedSourceFiles = changed.filter((file) => isSourceFile(file, root));
 	const result = coreBuildBugMemoryGate({
 		branch,
 		changedFiles: changed,
@@ -474,10 +479,11 @@ function buildAdrReminder(reason: "before_commit" | "manual_check"): { message: 
 	const config = loadConfig(root);
 	const branch = currentBranch();
 	const changed = changedFiles();
+	const changedSourceFiles = changed.filter((file) => isSourceFile(file, root));
 	const result = coreBuildAdrReminder({
 		branch,
 		changedFiles: changed,
-		changedSourceFiles: changed.filter(isSourceFile),
+		changedSourceFiles,
 		reason,
 		config,
 	});
@@ -491,7 +497,7 @@ function buildAdrReminder(reason: "before_commit" | "manual_check"): { message: 
 			event: "adr_reminder",
 			reason,
 			branch,
-			changedSourceFiles: changed.filter(isSourceFile),
+			changedSourceFiles,
 			message,
 		},
 	};
@@ -506,7 +512,7 @@ function buildBugMemoryReminder(
 	const config = loadConfig(root);
 	const branch = currentBranch();
 	const changed = changedFiles();
-	const changedSourceFiles = changed.filter(isSourceFile);
+	const changedSourceFiles = changed.filter((file) => isSourceFile(file, root));
 	const bugMemoryChanged = changed.some(
 		(file) => file === bugMemoryRelativePath || file.startsWith(`${bugsDirectory}/`),
 	);

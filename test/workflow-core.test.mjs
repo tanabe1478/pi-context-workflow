@@ -5,8 +5,11 @@ import {
   buildBugMemoryGate,
   changedBugDetailFiles,
   isBugfixBranch,
+  isSourceFile,
   matchingSpecs,
   matchesAnyPattern,
+  sourceExtensionsFromConfig,
+  sourceExtensionsForLanguage,
   sourceSpecs,
   suggestSpecs,
   tokenize,
@@ -38,6 +41,14 @@ const specs = [
     lastUpdated: undefined,
   },
 ];
+
+test('source extension config supports non-Swift projects', () => {
+  assert.deepEqual(sourceExtensionsFromConfig({}), ['.swift']);
+  assert.deepEqual(sourceExtensionsFromConfig({ source: { extensions: ['ts', '.tsx', 'ts'] } }), ['.ts', '.tsx']);
+  assert.deepEqual(sourceExtensionsForLanguage('python'), ['.py']);
+  assert.equal(isSourceFile('src/index.ts', { source: { extensions: ['.ts', '.tsx'] } }), true);
+  assert.equal(isSourceFile('Sources/App/main.swift', { source: { extensions: ['.ts', '.tsx'] } }), false);
+});
 
 test('sourceSpecs excludes bug-memory index and individual bug entries', () => {
   assert.deepEqual(

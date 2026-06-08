@@ -27,6 +27,7 @@ test('scaffold creates workflow files and pi package settings', () => {
   assert.deepEqual(settings.packages, ['/example/pi-context-workflow']);
 
   const config = readJson(path.join(root, '.pi', 'context-workflow.json'));
+  assert.deepEqual(config.source.extensions, ['.swift']);
   assert.equal(config.adr.enabled, true);
   assert.equal(config.bugMemory.enforce, true);
 
@@ -74,6 +75,23 @@ test('scaffold merges package path without duplicating existing settings', () =>
   settings = readJson(path.join(root, '.pi', 'settings.json'));
   assert.deepEqual(settings.packages, ['/existing/package', '/new/package']);
   assert.equal(settings.theme, 'dark');
+});
+
+test('scaffold supports language presets and explicit source extensions', () => {
+  const tsRoot = tempProject();
+  execFileSync(process.execPath, [scaffold, '--root', tsRoot, '--language', 'typescript'], { encoding: 'utf8' });
+  assert.deepEqual(readJson(path.join(tsRoot, '.pi', 'context-workflow.json')).source.extensions, [
+    '.ts',
+    '.tsx',
+    '.js',
+    '.jsx',
+    '.mjs',
+    '.cjs',
+  ]);
+
+  const customRoot = tempProject();
+  execFileSync(process.execPath, [scaffold, '--root', customRoot, '--source-extensions', 'rb,.rake'], { encoding: 'utf8' });
+  assert.deepEqual(readJson(path.join(customRoot, '.pi', 'context-workflow.json')).source.extensions, ['.rb', '.rake']);
 });
 
 test('dry-run does not write files', () => {

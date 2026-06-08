@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { languageSourceExtensions, normalizeExtensions, sourceExtensionsForLanguage } from '../src/workflow-core.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const packageRoot = path.resolve(path.dirname(__filename), '..');
@@ -11,14 +12,16 @@ function usage() {
   console.log(`pi-context-workflow scaffold
 
 Usage:
-  pi-context-workflow-scaffold [--root <project-root>] [--package-path <path>] [--force] [--dry-run]
+  pi-context-workflow-scaffold [--root <project-root>] [--package-path <path>] [--language <name>] [--source-extensions <list>] [--force] [--dry-run]
 
 Options:
-  --root <path>          Target project root. Defaults to git root or current directory.
-  --package-path <path>  Path added to .pi/settings.json packages. Defaults to this package root.
-  --force                Overwrite managed scaffold files when they already exist.
-  --dry-run              Print planned actions without writing files.
-  -h, --help             Show this help.
+  --root <path>                 Target project root. Defaults to git root or current directory.
+  --package-path <path>         Path added to .pi/settings.json packages. Defaults to this package root.
+  --language <name>             Source extension preset. Supported: ${Object.keys(languageSourceExtensions).join(', ')}.
+  --source-extensions <list>    Comma-separated source extensions, e.g. .ts,.tsx,.py. Overrides --language.
+  --force                       Overwrite managed scaffold files when they already exist.
+  --dry-run                     Print planned actions without writing files.
+  -h, --help                    Show this help.
 `);
 }
 
@@ -28,6 +31,8 @@ function parseArgs(argv) {
     const arg = argv[i];
     if (arg === '--root') args.root = argv[++i];
     else if (arg === '--package-path') args.packagePath = argv[++i];
+    else if (arg === '--language') args.language = argv[++i];
+    else if (arg === '--source-extensions') args.sourceExtensions = argv[++i];
     else if (arg === '--force') args.force = true;
     else if (arg === '--dry-run') args.dryRun = true;
     else if (arg === '-h' || arg === '--help') args.help = true;
@@ -98,31 +103,50 @@ function mergePiSettings(root, packagePath, dryRun) {
   writeJson(root, relativePath, settings, dryRun);
 }
 
+function resolveSourceExtensions(options) {
+  if (options.sourceExtensions) {
+    return normalizeExtensions(options.sourceExtensions.split(','));
+  }
+  if (options.language) {
+    const preset = sourceExtensionsForLanguage(options.language);
+    if (!preset) {
+      throw new Error(`Unsupported language: ${options.language}. Supported: ${Object.keys(languageSourceExtensions).join(', ')}`);
+    }
+    return preset;
+  }
+  return languageSourceExtensions.swift;
+}
+
 function scaffold(root, options) {
   const packagePath = path.resolve(options.packagePath ?? packageRoot);
+  const sourceExtensions = resolveSourceExtensions(options);
 
   mergePiSettings(root, packagePath, options.dryRun);
 
   writeFile(root, path.join('.pi', 'metrics', '.gitignore'), '*\n!.gitignore\n', options);
 
-  writeFile(root, path.join('.pi', 'context-workflow.json'), `{
-  "adr": {
-    "enabled": true,
-    "branchIgnorePatterns": ["^main$", "^master$", "^develop$"],
-    "strongSignals": [
-      { "name": "architecture docs", "patterns": ["^docs/architecture\\\\.md$", "^docs/.*/architecture.*\\\\.md$", "^docs/data-design\\\\.md$"] },
-      { "name": "package/dependency changes", "patterns": ["^Package\\\\.swift$", "^package\\\\.json$", "^pyproject\\\\.toml$", "^Cargo\\\\.toml$"] },
-      { "name": "migration changes", "patterns": ["Migration", "Migrations", "migrations"] },
-      { "name": "auth/oauth/security/storage areas", "patterns": ["auth", "oauth", "oidc", "security", "storage", "persistence", "redis", "dynamodb"] },
-      { "name": "public route/api changes", "patterns": ["routes?\\\\.swift$", "Controller", "Route", "OpenAPI", "api"] }
-    ]
+  writeFile(root, path.join('.pi', 'context-workflow.json'), `${JSON.stringify({
+  source: {
+    extensions: sourceExtensions,
   },
-  "bugMemory": {
-    "enforce": true,
-    "branchPatterns": ["(^|[\\\\\\\\/_-])(fix|bugfix|hotfix|bug|regression)([\\\\\\\\/_-]|$)"]
-  }
-}
+  adr: {
+    enabled: true,
+    branchIgnorePatterns: ['^main$', '^master$', '^develop$'],
+    strongSignals: [
+      { name: 'architecture docs', patterns: ['^docs/architecture\\.md$', '^docs/.*/architecture.*\\.md$', '^docs/data-design\\.md$'] },
+      { name: 'package/dependency changes', patterns: ['^Package\\.swift$', '^package\\.json$', '^pyproject\\.toml$', '^Cargo\\.toml$', '^go\\.mod$', '^pom\\.xml$', '^build\\.gradle', '^Gemfile$'] },
+      { name: 'migration changes', patterns: ['Migration', 'Migrations', 'migrations'] },
+      { name: 'auth/oauth/security/storage areas', patterns: ['auth', 'oauth', 'oidc', 'security', 'storage', 'persistence', 'redis', 'dynamodb'] },
+      { name: 'public route/api changes', patterns: ['routes?\\.swift$', 'Controller', 'Route', 'OpenAPI', 'api', 'router', 'routes'] },
+    ],
+  },
+  bugMemory: {
+    enforce: true,
+    branchPatterns: ['(^|[\\\\/_-])(fix|bugfix|hotfix|bug|regression)([\\\\/_-]|$)'],
+  },
+}, null, 2)}
 `, options);
+
 
   writeFile(root, path.join('docs', 'specs', 'README.md'), `# Specs
 

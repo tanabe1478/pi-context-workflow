@@ -1,5 +1,17 @@
 import path from 'node:path';
 
+export const defaultSourceExtensions = ['.swift'];
+export const languageSourceExtensions = {
+  swift: ['.swift'],
+  typescript: ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'],
+  javascript: ['.js', '.jsx', '.mjs', '.cjs'],
+  python: ['.py'],
+  rust: ['.rs'],
+  go: ['.go'],
+  kotlin: ['.kt', '.kts'],
+  java: ['.java'],
+  ruby: ['.rb'],
+};
 export const defaultBugfixBranchPatterns = ['(^|[\\/_-])(fix|bugfix|hotfix|bug|regression)([\\/_-]|$)'];
 export const defaultAdrBranchIgnorePatterns = ['^main$', '^master$', '^develop$', '^HEAD$'];
 export const defaultAdrStrongSignals = [
@@ -18,6 +30,24 @@ export function matchesAnyPattern(value, patterns) {
       return value.includes(pattern);
     }
   });
+}
+
+export function normalizeExtensions(extensions) {
+  return [...new Set(extensions.map((ext) => ext.trim()).filter(Boolean).map((ext) => (ext.startsWith('.') ? ext : `.${ext}`)))];
+}
+
+export function sourceExtensionsFromConfig(config = {}) {
+  const extensions = config.source?.extensions;
+  if (!Array.isArray(extensions) || extensions.length === 0) return defaultSourceExtensions;
+  return normalizeExtensions(extensions);
+}
+
+export function sourceExtensionsForLanguage(language) {
+  return languageSourceExtensions[String(language).toLowerCase()];
+}
+
+export function isSourceFile(filePath, config = {}) {
+  return sourceExtensionsFromConfig(config).some((ext) => filePath.endsWith(ext));
 }
 
 export function sourceSpecs(specs, options = {}) {

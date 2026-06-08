@@ -99,6 +99,8 @@ It does not overwrite existing managed docs by default. Use `--force` to overwri
 ```bash
 pi-context-workflow-scaffold --root /path/to/project --dry-run
 pi-context-workflow-scaffold --root /path/to/project --package-path /path/to/pi-context-workflow
+pi-context-workflow-scaffold --root /path/to/project --language typescript
+pi-context-workflow-scaffold --root /path/to/project --source-extensions .ts,.tsx,.py
 ```
 
 ### Manual install
@@ -171,6 +173,9 @@ Example:
 
 ```json
 {
+  "source": {
+    "extensions": [".swift", ".ts", ".tsx", ".py", ".rs", ".go"]
+  },
   "adr": {
     "enabled": true,
     "branchIgnorePatterns": ["^main$", "^master$", "^develop$"],
@@ -226,7 +231,7 @@ Add this to the target project's `.pi/metrics/.gitignore`:
 
 Current defaults:
 
-- source files: `.swift`
+- source files: `.swift` by default; configurable via `.pi/context-workflow.json` `source.extensions`
 - specs directory: `docs/specs`
 - bug memory index: `docs/specs/bug-memory.md`
 - bug detail directory: `docs/specs/bugs`
