@@ -6,9 +6,9 @@ This package is inspired by SwiftyGyaim's required spec workflow and is intended
 
 ## What it does
 
-- Reminds before editing source files to read related `docs/specs/*.md`
-- Checks spec freshness before `git commit`
-- Prompts creation of recommended project docs when missing
+- Reminds before editing source files to read related area specs in `docs/specs/*.md`
+- Checks area spec freshness before `git commit`
+- Prompts the agent to consider whether missing recommended docs are needed
 - Records local metrics to `.pi/metrics/context-workflow.jsonl`
 - Provides commands:
   - `/spec-check`
@@ -18,7 +18,7 @@ This package is inspired by SwiftyGyaim's required spec workflow and is intended
 
 ## Recommended project docs
 
-The extension checks for these baseline docs and prompts their creation when missing:
+The extension checks for these baseline docs and prompts the agent to consider whether missing docs are needed:
 
 ```text
 README.md
@@ -28,7 +28,16 @@ docs/specs/bug-memory.md
 docs/specs/project-setup.md
 ```
 
-These names are intentionally simple defaults. Future versions can add project configuration.
+These names are intentionally simple defaults, not hard requirements. If a project does not need one of them, the agent can decide not to create it and proceed with an explicit reason. Future versions can add project configuration.
+
+## Documentation granularity
+
+Specs are not meant to be 1:1 documents for source files, and the extension should not force a new spec for every file.
+
+Use `docs/specs/` for area-level behavior, constraints, flows, storage responsibilities, security requirements, and test perspectives.
+Use source documentation comments for local type/function contracts and implementation-specific details.
+
+A spec trigger means: "when touching this file, read this area spec". It does not mean: "this spec only documents this file". If a change is local and the existing docs or code comments are enough, no new spec is required.
 
 ## How specs are discovered
 
@@ -47,7 +56,7 @@ Each spec may declare triggers in the first few lines:
 > Last updated: 2026-06-03
 ```
 
-The extension matches edited files by basename or path fragment.
+The extension matches edited files by basename or path fragment. Multiple files can and should point to the same area spec.
 
 ## Install in a project
 
@@ -81,7 +90,7 @@ It checks:
 
 - the extension is loaded
 - Git repository root can be detected
-- baseline docs exist
+- suggested baseline docs exist, or are consciously unnecessary
 - spec files, excluding `docs/specs/README.md`, have `> Trigger:` and `> Last updated:` headers
 - metrics directory is writable
 - `.pi/settings.json` exists for project-scope usage

@@ -70,7 +70,7 @@ export default function (pi: ExtensionAPI) {
 		const result = buildPrerequisiteReminder("session_start");
 		if (result) {
 			writeMetric(result.metric);
-			if (ctx.hasUI) ctx.ui.notify(result.message, "warning");
+			if (ctx.hasUI) ctx.ui.notify(result.message, "info");
 		}
 	});
 
@@ -101,7 +101,7 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("spec-check", {
-		description: "Check required docs, changed source files, and related docs/specs freshness",
+		description: "Check recommended docs, changed source files, and related docs/specs freshness",
 		handler: async (_args, ctx) => {
 			const prerequisite = buildPrerequisiteReminder("manual_check");
 			const result = buildCommitReminder("manual_check");
@@ -112,7 +112,7 @@ export default function (pi: ExtensionAPI) {
 			if (messages.length > 0) {
 				ctx.ui.notify(messages.join("\n\n"), "info");
 			} else {
-				const message = "必要な基礎 docs は揃っています。変更された source file、または対応する spec は見つかりませんでした。";
+				const message = "推奨される基礎 docs は揃っています。変更された source file、または対応する spec は見つかりませんでした。";
 				writeMetric({ timestamp: new Date().toISOString(), event: "spec_check", reason: "manual_check", message });
 				ctx.ui.notify(message, "info");
 			}
@@ -149,7 +149,7 @@ function buildPrerequisiteReminder(
 	const missing = recommendedProjectDocs.filter((relativePath) => !fs.existsSync(path.join(root, relativePath)));
 	if (missing.length === 0) return undefined;
 
-	const message = `[Context Workflow] 推奨 docs が不足しています: ${missing.join(", ")}。実装前に README / AGENTS / docs/specs/README / bug-memory / project-setup を整備してください。`;
+	const message = `[Context Workflow] 推奨 docs が不足しています: ${missing.join(", ")}。実装前に、今回の作業に必要かを判断してください。必要なら README / AGENTS / docs/specs/README / bug-memory / project-setup などを整備し、不要なら理由を持って進めてください。`;
 	return {
 		message,
 		metric: {
@@ -218,9 +218,9 @@ function buildEditReminder(
 
 	let message: string;
 	if (specs.length === 0) {
-		message = `[Spec Reminder] ${targetPath} を編集する前に ${specsDirectory}/ を整備・確認してください。`;
+		message = `[Spec Reminder] ${targetPath} を編集する前に、領域 spec が必要か判断してください。必要なら ${specsDirectory}/ に領域 spec を作成し、不要なら既存 docs / code comment で十分な理由を持って進めてください。`;
 	} else if (missingSpec) {
-		message = `[Spec Reminder] ${targetPath} に対応する spec が見つかりません。${specsDirectory}/ の Trigger を確認してください。`;
+		message = `[Spec Reminder] ${targetPath} に対応する領域 spec が見つかりません。新しい振る舞い・制約・テスト観点を扱うなら ${specsDirectory}/ に領域 spec を追加してください。局所的な実装詳細だけなら code comment で十分か判断してください。`;
 	} else {
 		message = `[Spec Reminder] ${targetPath} を編集する前に ${matchedSpecs.join(", ")} を読んでください。仕様変更時は同じ作業で spec も更新してください。`;
 	}
@@ -255,7 +255,7 @@ function buildCommitReminder(reason: "before_commit" | "manual_check"): { messag
 
 	if (specs.length === 0) {
 		missingSpec = true;
-		const message = `[Spec Freshness] Source files changed: ${changedSourceFiles.join(", ")}。${specsDirectory}/ を整備・更新してください。`;
+		const message = `[Spec Freshness] Source files changed: ${changedSourceFiles.join(", ")}。今回の変更に領域 spec が必要か判断してください。必要なら ${specsDirectory}/ を作成・更新し、不要なら既存 docs / code comment で十分な理由を持って進めてください。`;
 		return {
 			message,
 			metric: {
@@ -286,7 +286,7 @@ function buildCommitReminder(reason: "before_commit" | "manual_check"): { messag
 		}
 	}
 
-	const message = `[Spec Freshness] コミット前に確認: ${checks.join("; ")}。動作仕様を変更した場合は対応specを同じコミットで更新し、バグ修正時は ${specsDirectory}/bug-memory.md に追記してください。`;
+	const message = `[Spec Freshness] コミット前に確認: ${checks.join("; ")}。動作仕様を変更した場合は対応する領域 spec を同じコミットで更新してください。局所的な変更だけなら spec 更新不要と判断してよいです。バグ修正時は ${specsDirectory}/bug-memory.md に追記してください。`;
 	return {
 		message,
 		metric: {
@@ -313,14 +313,14 @@ function buildDoctorReport(): { ok: boolean; missingPrerequisites: string[]; mes
 	}
 
 	const lines = ["Context workflow doctor"];
-	lines.push(`- ✅ extension loaded: /context-workflow-doctor command is available`);
+	lines.push(`- ✅ extension loaded: context_workflow_doctor tool is available`);
 	lines.push(`- ✅ repository root: ${root}`);
 
 	const missingPrerequisites = recommendedProjectDocs.filter((relativePath) => !fs.existsSync(path.join(root, relativePath)));
 	if (missingPrerequisites.length === 0) {
 		lines.push("- ✅ baseline docs: all present");
 	} else {
-		lines.push(`- ⚠️ baseline docs missing: ${missingPrerequisites.join(", ")}`);
+		lines.push(`- ℹ️ suggested baseline docs missing: ${missingPrerequisites.join(", ")} (create them only if useful for this project)`);
 	}
 
 	const specsDir = path.join(root, specsDirectory);
