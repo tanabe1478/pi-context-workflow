@@ -90,6 +90,7 @@ docs/specs/project-setup.md
 docs/specs/bug-memory.md
 docs/specs/bugs/.gitkeep
 docs/adr/README.md
+.github/pull_request_template.md
 .pi/context-workflow.json
 .pi/metrics/.gitignore
 ```
@@ -120,6 +121,22 @@ Or add to `.pi/settings.json` manually:
 ```
 
 Then run `/reload` in pi.
+
+## Pull request template
+
+The scaffold creates `.github/pull_request_template.md`.
+
+The template asks authors to write:
+
+- summary
+- why the change is needed
+- expected impact area
+- verification steps / commands
+- what was not verified and why
+- review focus
+- ADR decision
+
+When creating or editing PRs via CLI, generate a body file from this template and pass it with `--body-file`. Avoid putting Markdown directly in `--body "..."` because shell expansion can corrupt code blocks and backticks.
 
 ## Doctor tool
 

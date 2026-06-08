@@ -261,6 +261,57 @@ Proposed | Accepted | Superseded
 \`\`\`
 `, options);
 
+  writeFile(root, path.join('.github', 'pull_request_template.md'), `## 概要
+
+- 
+
+## なぜやるか
+
+
+## 想定している影響範囲
+
+### 影響あり
+
+- 
+
+### 影響なし
+
+- 
+
+## 動作確認方法
+
+実行したコマンド:
+
+\`\`\`bash
+
+\`\`\`
+
+確認できたこと:
+
+- 
+
+今回確認していないこと:
+
+- 
+
+確認していない理由:
+
+- 
+
+## レビューしてほしいこと
+
+- 
+
+## ADR
+
+- [ ] 作成した
+- [ ] 不要と判断した
+
+理由:
+
+- 
+`, options);
+
   return { root, packagePath, actions };
 }
 

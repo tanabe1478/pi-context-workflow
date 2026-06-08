@@ -37,6 +37,8 @@ test('scaffold creates workflow files and pi package settings', () => {
   assert.ok(fs.existsSync(path.join(root, 'docs', 'specs', 'bug-memory.md')));
   assert.ok(fs.existsSync(path.join(root, 'docs', 'specs', 'bugs', '.gitkeep')));
   assert.ok(fs.existsSync(path.join(root, 'docs', 'adr', 'README.md')));
+  assert.ok(fs.existsSync(path.join(root, '.github', 'pull_request_template.md')));
+  assert.match(fs.readFileSync(path.join(root, '.github', 'pull_request_template.md'), 'utf8'), /## 動作確認方法/);
 });
 
 test('scaffold preserves existing files unless --force is used', () => {

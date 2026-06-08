@@ -22,6 +22,12 @@ pi-context-workflow リポジトリで作業するエージェント向けのル
 - 判定ロジックはできるだけ `src/` の純粋関数に切り出してテストする
 - extension は pi API との adapter として薄く保つ
 
+## PR
+
+- PR description はテンプレートに沿って、概要、なぜやるか、影響範囲、動作確認方法、未確認事項と理由を書く
+- CLI で PR を作成・編集するときは Markdown を `--body` に直書きせず、`--body-file` を使う
+- scaffold は `.github/pull_request_template.md` も作成する
+
 ## Scaffold / config
 
 - 新規プロジェクトへ決定論的に導入できる scaffold を維持する
