@@ -5,6 +5,12 @@
   "keywords": ["pi-package", "pi", "context-engineering", "spec-workflow", "documentation"],
   "license": "MIT",
   "type": "module",
+  "bin": {
+    "pi-context-workflow-scaffold": "./bin/scaffold.mjs"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
   "pi": {
     "extensions": ["./extensions"]
   },

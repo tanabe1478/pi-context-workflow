@@ -18,6 +18,8 @@ This package is inspired by SwiftyGyaim's required spec workflow and is intended
   - `/spec-metrics`
 - Provides an agent-callable tool:
   - `context_workflow_doctor`
+- Provides a deterministic scaffold CLI:
+  - `pi-context-workflow-scaffold`
 
 ## Recommended project docs
 
@@ -64,6 +66,42 @@ The extension matches edited files by basename or path fragment. Multiple files 
 When a changed source file has no matching trigger, the extension uses a lightweight filename/path token heuristic to suggest existing candidate specs. If the file belongs to an existing area, add the file name or path fragment to that spec's `Trigger:` line. This is advisory; do not add triggers mechanically for temporary helpers or files whose behavior is local and sufficiently documented in code comments.
 
 ## Install in a project
+
+### Scaffold recommended files
+
+From any target project root, run:
+
+```bash
+node /absolute/path/to/pi-context-workflow/bin/scaffold.mjs
+```
+
+Or, when installed as a package/bin:
+
+```bash
+pi-context-workflow-scaffold
+```
+
+The scaffold deterministically creates or updates:
+
+```text
+.pi/settings.json
+docs/specs/README.md
+docs/specs/project-setup.md
+docs/specs/bug-memory.md
+docs/specs/bugs/.gitkeep
+docs/adr/README.md
+.pi/context-workflow.json
+.pi/metrics/.gitignore
+```
+
+It does not overwrite existing managed docs by default. Use `--force` to overwrite and `--dry-run` to preview:
+
+```bash
+pi-context-workflow-scaffold --root /path/to/project --dry-run
+pi-context-workflow-scaffold --root /path/to/project --package-path /path/to/pi-context-workflow
+```
+
+### Manual install
 
 From a project root:
 
