@@ -13,6 +13,7 @@ This package is inspired by SwiftyGyaim's required spec workflow and is intended
 - Provides commands:
   - `/spec-check`
   - `/spec-metrics`
+  - `/context-workflow-doctor`
 
 ## Recommended project docs
 
@@ -64,6 +65,23 @@ Or add to `.pi/settings.json` manually:
 ```
 
 Then run `/reload` in pi.
+
+## Doctor command
+
+Run this after installing or reloading the package:
+
+```text
+/context-workflow-doctor
+```
+
+It checks:
+
+- the extension is loaded
+- Git repository root can be detected
+- baseline docs exist
+- specs have `> Trigger:` and `> Last updated:` headers
+- metrics directory is writable
+- `.pi/settings.json` exists for project-scope usage
 
 ## Metrics
 

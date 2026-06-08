@@ -20,8 +20,8 @@ type Reason = "before_edit" | "before_write" | "before_commit" | "manual_check";
 
 type Metric = {
 	timestamp: string;
-	event: "spec_reminder" | "spec_freshness" | "spec_check" | "prerequisite_check";
-	reason: Reason | "session_start";
+	event: "spec_reminder" | "spec_freshness" | "spec_check" | "prerequisite_check" | "doctor_check";
+	reason: Reason | "session_start" | "manual_doctor";
 	target?: string;
 	changedSourceFiles?: string[];
 	matchedSpecs?: string[];
@@ -100,6 +100,21 @@ export default function (pi: ExtensionAPI) {
 		description: "Show context workflow metrics summary for this project",
 		handler: async (_args, ctx) => {
 			ctx.ui.notify(buildMetricsSummary(), "info");
+		},
+	});
+
+	pi.registerCommand("context-workflow-doctor", {
+		description: "Diagnose whether pi-context-workflow is set up correctly in this project",
+		handler: async (_args, ctx) => {
+			const report = buildDoctorReport();
+			writeMetric({
+				timestamp: new Date().toISOString(),
+				event: "doctor_check",
+				reason: "manual_doctor",
+				missingPrerequisites: report.missingPrerequisites,
+				message: report.message,
+			});
+			ctx.ui.notify(report.message, report.ok ? "info" : "warning");
 		},
 	});
 }
@@ -278,6 +293,69 @@ function buildCommitReminder(reason: "before_commit" | "manual_check"): { messag
 	};
 }
 
+function buildDoctorReport(): { ok: boolean; missingPrerequisites: string[]; message: string } {
+	const root = repoRoot();
+	if (!root) {
+		return {
+			ok: false,
+			missingPrerequisites: [],
+			message: "Context workflow doctor\n- ❌ git repository root を検出できません。pi を Git repository 内で起動してください。",
+		};
+	}
+
+	const lines = ["Context workflow doctor"];
+	lines.push(`- ✅ extension loaded: /context-workflow-doctor command is available`);
+	lines.push(`- ✅ repository root: ${root}`);
+
+	const missingPrerequisites = recommendedProjectDocs.filter((relativePath) => !fs.existsSync(path.join(root, relativePath)));
+	if (missingPrerequisites.length === 0) {
+		lines.push("- ✅ baseline docs: all present");
+	} else {
+		lines.push(`- ⚠️ baseline docs missing: ${missingPrerequisites.join(", ")}`);
+	}
+
+	const specsDir = path.join(root, specsDirectory);
+	if (!fs.existsSync(specsDir)) {
+		lines.push(`- ⚠️ specs directory missing: ${specsDirectory}`);
+	} else {
+		const specs = loadSpecs(root);
+		lines.push(`- ✅ specs directory: ${specsDirectory} (${specs.length} spec file(s))`);
+		const missingTrigger = specs.filter((spec) => spec.triggers.length === 0).map((spec) => spec.path);
+		const missingUpdated = specs.filter((spec) => !spec.lastUpdated).map((spec) => spec.path);
+		if (missingTrigger.length === 0) {
+			lines.push("- ✅ spec triggers: all specs have > Trigger");
+		} else {
+			lines.push(`- ⚠️ spec triggers missing: ${missingTrigger.join(", ")}`);
+		}
+		if (missingUpdated.length === 0) {
+			lines.push("- ✅ spec freshness headers: all specs have > Last updated");
+		} else {
+			lines.push(`- ⚠️ spec Last updated missing: ${missingUpdated.join(", ")}`);
+		}
+	}
+
+	const metrics = metricsPath();
+	if (metrics) {
+		try {
+			fs.mkdirSync(path.dirname(metrics), { recursive: true });
+			fs.accessSync(path.dirname(metrics), fs.constants.W_OK);
+			lines.push(`- ✅ metrics directory writable: ${path.relative(root, path.dirname(metrics))}`);
+		} catch {
+			lines.push(`- ⚠️ metrics directory is not writable: ${path.relative(root, path.dirname(metrics))}`);
+		}
+	}
+
+	const settingsPath = path.join(root, ".pi", "settings.json");
+	if (fs.existsSync(settingsPath)) {
+		lines.push("- ✅ project pi settings: .pi/settings.json present");
+	} else {
+		lines.push("- ℹ️ project pi settings: .pi/settings.json not found. This is OK for global installs, but project-scope install is recommended for shared workflow.");
+	}
+
+	const ok = lines.every((line) => !line.includes("⚠️") && !line.includes("❌"));
+	return { ok, missingPrerequisites, message: lines.join("\n") };
+}
+
 function changedFiles(): string[] {
 	const commands = ["git diff --cached --name-only --diff-filter=ACMR", "git diff --name-only --diff-filter=ACMR"];
 	const files = new Set<string>();
@@ -328,6 +406,7 @@ function buildMetricsSummary(): string {
 	const reminderCount = metrics.filter((m) => m.event === "spec_reminder").length;
 	const freshnessCount = metrics.filter((m) => m.event === "spec_freshness").length;
 	const manualCheckCount = metrics.filter((m) => m.event === "spec_check").length;
+	const doctorCheckCount = metrics.filter((m) => m.event === "doctor_check").length;
 	const prerequisiteCheckCount = metrics.filter((m) => m.event === "prerequisite_check").length;
 	const missingPrerequisiteCount = metrics.filter((m) => (m.missingPrerequisites ?? []).length > 0).length;
 	const missingSpecCount = metrics.filter((m) => m.missingSpec).length;
@@ -340,6 +419,7 @@ function buildMetricsSummary(): string {
 		`- spec reminders: ${reminderCount}`,
 		`- freshness checks: ${freshnessCount}`,
 		`- manual checks: ${manualCheckCount}`,
+		`- doctor checks: ${doctorCheckCount}`,
 		`- prerequisite checks: ${prerequisiteCheckCount}`,
 		`- missing prerequisite events: ${missingPrerequisiteCount}`,
 		`- missing spec events: ${missingSpecCount}`,
