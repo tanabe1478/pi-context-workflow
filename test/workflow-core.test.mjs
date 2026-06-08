@@ -43,7 +43,7 @@ const specs = [
 ];
 
 test('source extension config supports non-Swift projects', () => {
-  assert.deepEqual(sourceExtensionsFromConfig({}), ['.swift']);
+  assert.throws(() => sourceExtensionsFromConfig({}), /source\.extensions is required/);
   assert.deepEqual(sourceExtensionsFromConfig({ source: { extensions: ['ts', '.tsx', 'ts'] } }), ['.ts', '.tsx']);
   assert.deepEqual(sourceExtensionsForLanguage('python'), ['.py']);
   assert.equal(isSourceFile('src/index.ts', { source: { extensions: ['.ts', '.tsx'] } }), true);

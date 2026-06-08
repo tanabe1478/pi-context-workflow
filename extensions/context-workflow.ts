@@ -14,6 +14,7 @@ import {
 	buildBugMemoryGate as coreBuildBugMemoryGate,
 	isBugfixBranch as coreIsBugfixBranch,
 	isSourceFile as coreIsSourceFile,
+	validateSourceConfig as coreValidateSourceConfig,
 	matchingSpecs as coreMatchingSpecs,
 	matchesAnyPattern as coreMatchesAnyPattern,
 	sourceSpecs as coreSourceSpecs,
@@ -72,7 +73,6 @@ type WorkflowConfig = {
 	};
 };
 
-const defaultSourceExtensions = [".swift"];
 const specsDirectory = path.join("docs", "specs");
 const bugMemoryRelativePath = path.join(specsDirectory, "bug-memory.md");
 const bugsDirectory = path.join(specsDirectory, "bugs");
@@ -129,6 +129,11 @@ export default function (pi: ExtensionAPI) {
 	pi.on("tool_call", async (event, ctx) => {
 		if (event.toolName === "edit" || event.toolName === "write") {
 			const targetPath = String((event.input as { path?: unknown }).path ?? "");
+			const configGate = buildConfigGate(targetPath, event.toolName === "edit" ? "before_edit" : "before_write");
+			if (configGate) {
+				writeMetric(configGate.metric);
+				return { block: true, reason: configGate.message };
+			}
 			const root = repoRoot();
 			if (isSourceFile(targetPath, root)) {
 				const bugGate = buildBugMemoryGate(targetPath, event.toolName === "edit" ? "before_edit" : "before_write");
@@ -148,6 +153,11 @@ export default function (pi: ExtensionAPI) {
 		if (event.toolName === "bash") {
 			const command = String((event.input as { command?: unknown }).command ?? "");
 			if (/^\s*git\s+commit\b/.test(command)) {
+				const configGate = buildConfigGate(undefined, "before_commit");
+				if (configGate) {
+					writeMetric(configGate.metric);
+					return { block: true, reason: configGate.message };
+				}
 				const bugGate = buildBugMemoryGate(undefined, "before_commit");
 				if (bugGate) {
 					writeMetric(bugGate.metric);
@@ -234,8 +244,37 @@ function isIgnoredAdrBranch(branch: string | undefined, config: WorkflowConfig):
 	return matchesAnyPattern(branch, config.adr?.branchIgnorePatterns ?? defaultAdrBranchIgnorePatterns);
 }
 
+function validateSourceConfig(root: string): { ok: boolean; extensions?: string[]; message?: string } {
+	return coreValidateSourceConfig(loadConfig(root));
+}
+
+function buildConfigGate(targetPath: string | undefined, reason: Reason | "before_commit"): { message: string; metric: Metric } | undefined {
+	const root = repoRoot();
+	if (!root) return undefined;
+	const validation = validateSourceConfig(root);
+	if (validation.ok) return undefined;
+	if (targetPath === configRelativePath || targetPath?.endsWith(configRelativePath)) return undefined;
+
+	const message = `[Context Workflow Gate] .pi/context-workflow.json の source.extensions が未設定です。対象プロジェクトの source extensions を明示してください。例: { "source": { "extensions": [".ts", ".tsx"] } }`;
+	return {
+		message,
+		metric: {
+			timestamp: new Date().toISOString(),
+			event: "prerequisite_check",
+			reason,
+			target: targetPath,
+			message,
+		},
+	};
+}
+
 function isSourceFile(filePath: string, root: string | undefined = repoRoot()): boolean {
-	return coreIsSourceFile(filePath, root ? loadConfig(root) : { source: { extensions: defaultSourceExtensions } });
+	if (!root) return false;
+	try {
+		return coreIsSourceFile(filePath, loadConfig(root));
+	} catch {
+		return false;
+	}
 }
 
 function buildPrerequisiteReminder(
@@ -589,8 +628,14 @@ function buildDoctorReport(): { ok: boolean; missingPrerequisites: string[]; mes
 	const workflowConfigPath = path.join(root, configRelativePath);
 	if (fs.existsSync(workflowConfigPath)) {
 		lines.push(`- ✅ workflow config: ${configRelativePath} present`);
+		const sourceValidation = validateSourceConfig(root);
+		if (sourceValidation.ok) {
+			lines.push(`- ✅ source extensions: ${sourceValidation.extensions?.join(", ")}`);
+		} else {
+			lines.push(`- ❌ source extensions: ${sourceValidation.message}`);
+		}
 	} else {
-		lines.push(`- ℹ️ workflow config: ${configRelativePath} not found. Built-in defaults will be used.`);
+		lines.push(`- ❌ workflow config: ${configRelativePath} not found. Run scaffold with --language or --source-extensions.`);
 	}
 
 	const settingsPath = path.join(root, ".pi", "settings.json");

@@ -17,8 +17,8 @@ Usage:
 Options:
   --root <path>                 Target project root. Defaults to git root or current directory.
   --package-path <path>         Path added to .pi/settings.json packages. Defaults to this package root.
-  --language <name>             Source extension preset. Supported: ${Object.keys(languageSourceExtensions).join(', ')}.
-  --source-extensions <list>    Comma-separated source extensions, e.g. .ts,.tsx,.py. Overrides --language.
+  --language <name>             Required unless --source-extensions is specified. Supported: ${Object.keys(languageSourceExtensions).join(', ')}.
+  --source-extensions <list>    Required unless --language is specified. Comma-separated source extensions, e.g. .ts,.tsx,.py. Overrides --language.
   --force                       Overwrite managed scaffold files when they already exist.
   --dry-run                     Print planned actions without writing files.
   -h, --help                    Show this help.
@@ -114,7 +114,7 @@ function resolveSourceExtensions(options) {
     }
     return preset;
   }
-  return languageSourceExtensions.swift;
+  throw new Error('Either --language or --source-extensions is required. Example: --language typescript');
 }
 
 function scaffold(root, options) {

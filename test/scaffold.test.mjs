@@ -19,7 +19,7 @@ function readJson(file) {
 test('scaffold creates workflow files and pi package settings', () => {
   const root = tempProject();
 
-  execFileSync(process.execPath, [scaffold, '--root', root, '--package-path', '/example/pi-context-workflow'], {
+  execFileSync(process.execPath, [scaffold, '--root', root, '--package-path', '/example/pi-context-workflow', '--language', 'swift'], {
     encoding: 'utf8',
   });
 
@@ -45,10 +45,10 @@ test('scaffold preserves existing files unless --force is used', () => {
   fs.mkdirSync(specPath, { recursive: true });
   fs.writeFileSync(path.join(specPath, 'README.md'), 'custom\n');
 
-  execFileSync(process.execPath, [scaffold, '--root', root], { encoding: 'utf8' });
+  execFileSync(process.execPath, [scaffold, '--root', root, '--language', 'swift'], { encoding: 'utf8' });
   assert.equal(fs.readFileSync(path.join(specPath, 'README.md'), 'utf8'), 'custom\n');
 
-  execFileSync(process.execPath, [scaffold, '--root', root, '--force'], { encoding: 'utf8' });
+  execFileSync(process.execPath, [scaffold, '--root', root, '--force', '--language', 'swift'], { encoding: 'utf8' });
   assert.notEqual(fs.readFileSync(path.join(specPath, 'README.md'), 'utf8'), 'custom\n');
 });
 
@@ -60,7 +60,7 @@ test('scaffold merges package path without duplicating existing settings', () =>
     JSON.stringify({ packages: ['/existing/package'], theme: 'dark' }, null, 2),
   );
 
-  execFileSync(process.execPath, [scaffold, '--root', root, '--package-path', '/existing/package'], {
+  execFileSync(process.execPath, [scaffold, '--root', root, '--package-path', '/existing/package', '--language', 'swift'], {
     encoding: 'utf8',
   });
 
@@ -68,7 +68,7 @@ test('scaffold merges package path without duplicating existing settings', () =>
   assert.deepEqual(settings.packages, ['/existing/package']);
   assert.equal(settings.theme, 'dark');
 
-  execFileSync(process.execPath, [scaffold, '--root', root, '--package-path', '/new/package'], {
+  execFileSync(process.execPath, [scaffold, '--root', root, '--package-path', '/new/package', '--language', 'swift'], {
     encoding: 'utf8',
   });
 
@@ -94,9 +94,18 @@ test('scaffold supports language presets and explicit source extensions', () => 
   assert.deepEqual(readJson(path.join(customRoot, '.pi', 'context-workflow.json')).source.extensions, ['.rb', '.rake']);
 });
 
+test('scaffold requires language or explicit source extensions', () => {
+  const root = tempProject();
+
+  assert.throws(
+    () => execFileSync(process.execPath, [scaffold, '--root', root], { encoding: 'utf8', stdio: 'pipe' }),
+    /Either --language or --source-extensions is required/,
+  );
+});
+
 test('dry-run does not write files', () => {
   const root = tempProject();
-  const output = execFileSync(process.execPath, [scaffold, '--root', root, '--dry-run'], { encoding: 'utf8' });
+  const output = execFileSync(process.execPath, [scaffold, '--root', root, '--dry-run', '--language', 'swift'], { encoding: 'utf8' });
 
   assert.match(output, /dry-run: no files were written/);
   assert.equal(fs.existsSync(path.join(root, '.pi')), false);

@@ -69,16 +69,16 @@ When a changed source file has no matching trigger, the extension uses a lightwe
 
 ### Scaffold recommended files
 
-From any target project root, run:
+From any target project root, run with an explicit language or source extension list:
 
 ```bash
-node /absolute/path/to/pi-context-workflow/bin/scaffold.mjs
+node /absolute/path/to/pi-context-workflow/bin/scaffold.mjs --language typescript
 ```
 
 Or, when installed as a package/bin:
 
 ```bash
-pi-context-workflow-scaffold
+pi-context-workflow-scaffold --language typescript
 ```
 
 The scaffold deterministically creates or updates:
@@ -97,9 +97,9 @@ docs/adr/README.md
 It does not overwrite existing managed docs by default. Use `--force` to overwrite and `--dry-run` to preview:
 
 ```bash
-pi-context-workflow-scaffold --root /path/to/project --dry-run
-pi-context-workflow-scaffold --root /path/to/project --package-path /path/to/pi-context-workflow
-pi-context-workflow-scaffold --root /path/to/project --language typescript
+pi-context-workflow-scaffold --root /path/to/project --language swift --dry-run
+pi-context-workflow-scaffold --root /path/to/project --language typescript --package-path /path/to/pi-context-workflow
+pi-context-workflow-scaffold --root /path/to/project --language python
 pi-context-workflow-scaffold --root /path/to/project --source-extensions .ts,.tsx,.py
 ```
 
@@ -231,7 +231,7 @@ Add this to the target project's `.pi/metrics/.gitignore`:
 
 Current defaults:
 
-- source files: `.swift` by default; configurable via `.pi/context-workflow.json` `source.extensions`
+- source files: no implicit default; `.pi/context-workflow.json` `source.extensions` is required
 - specs directory: `docs/specs`
 - bug memory index: `docs/specs/bug-memory.md`
 - bug detail directory: `docs/specs/bugs`

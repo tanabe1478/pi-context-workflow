@@ -1,6 +1,5 @@
 import path from 'node:path';
 
-export const defaultSourceExtensions = ['.swift'];
 export const languageSourceExtensions = {
   swift: ['.swift'],
   typescript: ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'],
@@ -38,8 +37,19 @@ export function normalizeExtensions(extensions) {
 
 export function sourceExtensionsFromConfig(config = {}) {
   const extensions = config.source?.extensions;
-  if (!Array.isArray(extensions) || extensions.length === 0) return defaultSourceExtensions;
+  if (!Array.isArray(extensions) || extensions.length === 0) {
+    throw new Error('source.extensions is required in .pi/context-workflow.json');
+  }
   return normalizeExtensions(extensions);
+}
+
+export function validateSourceConfig(config = {}) {
+  try {
+    const extensions = sourceExtensionsFromConfig(config);
+    return { ok: true, extensions };
+  } catch (error) {
+    return { ok: false, message: error.message };
+  }
 }
 
 export function sourceExtensionsForLanguage(language) {
