@@ -191,6 +191,22 @@ Example:
 
 `patterns` are regular expressions matched against changed file paths or branch names.
 
+## Testing
+
+Run deterministic tests for the scaffold CLI and workflow core logic:
+
+```bash
+npm test
+```
+
+Covered areas include:
+
+- scaffold file creation / merge / dry-run behavior
+- spec trigger matching and candidate suggestions
+- bug memory gate conditions
+- ADR reminder strong-signal matching
+- project config overrides
+
 ## Metrics
 
 Metrics are written locally and should usually not be committed:

@@ -9,6 +9,15 @@ import { Type } from "typebox";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { execSync } from "node:child_process";
+import {
+	buildAdrReminder as coreBuildAdrReminder,
+	buildBugMemoryGate as coreBuildBugMemoryGate,
+	isBugfixBranch as coreIsBugfixBranch,
+	matchingSpecs as coreMatchingSpecs,
+	matchesAnyPattern as coreMatchesAnyPattern,
+	sourceSpecs as coreSourceSpecs,
+	suggestSpecs as coreSuggestSpecs,
+} from "../src/workflow-core.mjs";
 
 type SpecInfo = {
 	path: string;
@@ -212,13 +221,7 @@ function loadConfig(root: string): WorkflowConfig {
 }
 
 function matchesAnyPattern(value: string, patterns: string[]): boolean {
-	return patterns.some((pattern) => {
-		try {
-			return new RegExp(pattern, "i").test(value);
-		} catch {
-			return value.includes(pattern);
-		}
-	});
+	return coreMatchesAnyPattern(value, patterns);
 }
 
 function isIgnoredAdrBranch(branch: string | undefined, config: WorkflowConfig): boolean {
@@ -284,18 +287,11 @@ function parseTriggers(line: string | undefined): string[] {
 }
 
 function sourceSpecs(specs: SpecInfo[]): SpecInfo[] {
-	return specs.filter((spec) => spec.path !== bugMemoryRelativePath && !spec.path.startsWith(`${bugsDirectory}/`));
+	return coreSourceSpecs(specs, { bugMemoryRelativePath, bugsDirectory });
 }
 
 function matchingSpecs(specs: SpecInfo[], filePath: string): SpecInfo[] {
-	const base = path.basename(filePath);
-	const normalized = filePath.replace(/\\/g, "/");
-	return sourceSpecs(specs).filter((spec) =>
-		spec.triggers.some((trigger) => {
-			if (trigger === "全ファイル" || trigger.includes("全ファイル")) return true;
-			return trigger === base || normalized.endsWith(trigger) || normalized.includes(trigger);
-		}),
-	);
+	return coreMatchingSpecs(specs, filePath, { bugMemoryRelativePath, bugsDirectory });
 }
 
 function tokenize(value: string): string[] {
@@ -307,24 +303,7 @@ function tokenize(value: string): string[] {
 }
 
 function suggestSpecs(specs: SpecInfo[], filePath: string): SpecInfo[] {
-	const source = sourceSpecs(specs);
-	const fileTokens = new Set(tokenize(filePath));
-	if (fileTokens.size === 0) return [];
-
-	return source
-		.map((spec) => {
-			const haystack = [spec.name, spec.path, ...spec.triggers].join(" ");
-			const specTokens = new Set(tokenize(haystack));
-			let score = 0;
-			for (const token of fileTokens) {
-				if (specTokens.has(token)) score += 1;
-			}
-			return { spec, score };
-		})
-		.filter((item) => item.score > 0)
-		.sort((a, b) => b.score - a.score)
-		.slice(0, 3)
-		.map((item) => item.spec);
+	return coreSuggestSpecs(specs, filePath, { bugMemoryRelativePath, bugsDirectory });
 }
 
 function buildEditReminder(
@@ -443,8 +422,7 @@ function currentBranch(): string | undefined {
 }
 
 function isBugfixBranch(branch: string | undefined, config: WorkflowConfig): boolean {
-	if (!branch || branch === "HEAD") return false;
-	return matchesAnyPattern(branch, config.bugMemory?.branchPatterns ?? defaultBugfixBranchPatterns);
+	return coreIsBugfixBranch(branch, config);
 }
 
 function changedBugDetailFiles(files: string[]): string[] {
@@ -459,26 +437,22 @@ function buildBugMemoryGate(
 	if (!root) return undefined;
 
 	const config = loadConfig(root);
-	if (config.bugMemory?.enforce === false) return undefined;
-
 	const branch = currentBranch();
-	if (!isBugfixBranch(branch, config)) return undefined;
-
 	const changed = changedFiles();
-	const bugDetails = changedBugDetailFiles(changed);
-	const indexChanged = changed.includes(bugMemoryRelativePath);
 	const changedSourceFiles = changed.filter(isSourceFile);
+	const result = coreBuildBugMemoryGate({
+		branch,
+		changedFiles: changed,
+		changedSourceFiles,
+		targetPath,
+		reason,
+		config,
+		bugMemoryRelativePath,
+		bugsDirectory,
+	});
 
-	let message: string | undefined;
-	if (reason === "before_commit") {
-		if (bugDetails.length === 0 || !indexChanged) {
-			message = `[Bug Memory Gate] ${branch} は bugfix 系ブランチです。commit 前に ${bugsDirectory}/BUG-XXX-short-title.md の追加/更新と ${bugMemoryRelativePath} の index 更新が必要です。`;
-		}
-	} else if (bugDetails.length === 0) {
-		message = `[Bug Memory Gate] ${branch} は bugfix 系ブランチです。source を編集する前に ${bugsDirectory}/BUG-XXX-short-title.md を作成してください。`;
-	}
-
-	if (!message) return undefined;
+	if (!result) return undefined;
+	const message = result.message;
 	return {
 		message,
 		metric: {
@@ -498,20 +472,17 @@ function buildAdrReminder(reason: "before_commit" | "manual_check"): { message: 
 	if (!root) return undefined;
 
 	const config = loadConfig(root);
-	if (config.adr?.enabled === false) return undefined;
-
 	const branch = currentBranch();
-	if (isIgnoredAdrBranch(branch, config)) return undefined;
-
 	const changed = changedFiles();
-	if (changed.length === 0) return undefined;
-
-	const rules = config.adr?.strongSignals ?? defaultAdrStrongSignals;
-	const matchedSignals = rules
-		.filter((rule) => changed.some((file) => matchesAnyPattern(file, rule.patterns)))
-		.map((rule) => rule.name);
-	const strength = matchedSignals.length > 0 ? `特に ${matchedSignals.join(", ")} に関わる変更があります。` : "";
-	const message = `[ADR Reminder] branch ${branch} で作業中です。重要な設計判断・トレードオフ・将来の制約があるなら docs/adr/ADR-XXX-title.md を作成してください。${strength} spec 更新で十分な変更なら ADR 不要と判断して進めてください。`;
+	const result = coreBuildAdrReminder({
+		branch,
+		changedFiles: changed,
+		changedSourceFiles: changed.filter(isSourceFile),
+		reason,
+		config,
+	});
+	if (!result) return undefined;
+	const message = result.message;
 
 	return {
 		message,
