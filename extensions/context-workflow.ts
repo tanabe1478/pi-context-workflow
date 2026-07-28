@@ -8,17 +8,21 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import {
 	buildAdrReminder as coreBuildAdrReminder,
 	buildBugMemoryGate as coreBuildBugMemoryGate,
 	isBugfixBranch as coreIsBugfixBranch,
+	isRemotePackageSource,
+	isStaleSpecDate,
 	isSourceFile as coreIsSourceFile,
 	validateSourceConfig as coreValidateSourceConfig,
 	matchingSpecs as coreMatchingSpecs,
 	matchesAnyPattern as coreMatchesAnyPattern,
+	packageSourceFromSetting,
 	sourceSpecs as coreSourceSpecs,
 	suggestSpecs as coreSuggestSpecs,
+	unmatchedSourceFiles,
 } from "../src/workflow-core.mjs";
 
 type SpecInfo = {
@@ -65,6 +69,7 @@ type WorkflowConfig = {
 	adr?: {
 		enabled?: boolean;
 		branchIgnorePatterns?: string[];
+		remindOnIgnoredBranchesForStrongSignals?: boolean;
 		strongSignals?: PatternRule[];
 	};
 	bugMemory?: {
@@ -612,6 +617,30 @@ function buildDoctorReport(): { ok: boolean; missingPrerequisites: string[]; mes
 		} else {
 			lines.push(`- ⚠️ spec Last updated missing: ${missingUpdated.join(", ")}`);
 		}
+
+		const staleHeaders = specs.flatMap((spec) => {
+			const committedDate = lastCommittedChangeDate(root, spec.path);
+			return isStaleSpecDate(spec.lastUpdated, committedDate)
+				? [`${spec.path} (${spec.lastUpdated} < ${committedDate})`]
+				: [];
+		});
+		if (staleHeaders.length === 0) {
+			lines.push("- ✅ spec Last updated values: consistent with Git history");
+		} else {
+			lines.push(`- ⚠️ stale spec Last updated values: ${staleHeaders.join(", ")}`);
+		}
+
+		const sourceValidation = validateSourceConfig(root);
+		if (sourceValidation.ok) {
+			const unmatched = unmatchedSourceFiles(specs, trackedSourceFiles(root), { bugMemoryRelativePath, bugsDirectory });
+			if (unmatched.length === 0) {
+				lines.push("- ✅ tracked source coverage: all source files match a spec Trigger");
+			} else {
+				const preview = unmatched.slice(0, 10).join(", ");
+				const remainder = unmatched.length > 10 ? `, ... (+${unmatched.length - 10})` : "";
+				lines.push(`- ℹ️ tracked source files without a Trigger match: ${preview}${remainder} (advisory)`);
+			}
+		}
 	}
 
 	const metrics = metricsPath();
@@ -641,12 +670,61 @@ function buildDoctorReport(): { ok: boolean; missingPrerequisites: string[]; mes
 	const settingsPath = path.join(root, ".pi", "settings.json");
 	if (fs.existsSync(settingsPath)) {
 		lines.push("- ✅ project pi settings: .pi/settings.json present");
+		try {
+			const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8")) as { packages?: unknown[] };
+			const packageSources = (Array.isArray(settings.packages) ? settings.packages : [])
+				.map(packageSourceFromSetting)
+				.filter((source): source is string => Boolean(source));
+			const workflowSources = packageSources.filter((source) => source.includes("pi-context-workflow"));
+			if (workflowSources.length === 0) {
+				lines.push("- ⚠️ project package source: pi-context-workflow is not referenced from .pi/settings.json");
+			} else {
+				for (const source of workflowSources) {
+					if (isRemotePackageSource(source)) {
+						lines.push(`- ✅ project package source: ${source} (portable)`);
+						continue;
+					}
+					const localPath = path.isAbsolute(source) || /^[A-Za-z]:[\\/]/.test(source)
+						? source
+						: path.resolve(path.dirname(settingsPath), source);
+					if (fs.existsSync(localPath)) {
+						lines.push(`- ℹ️ project package source: ${source} (local path; not portable)`);
+					} else {
+						lines.push(`- ⚠️ project package source does not exist on this machine: ${source}`);
+					}
+				}
+			}
+		} catch (error) {
+			lines.push(`- ❌ project pi settings is invalid JSON: ${error instanceof Error ? error.message : String(error)}`);
+		}
 	} else {
 		lines.push("- ℹ️ project pi settings: .pi/settings.json not found. This is OK for global installs, but project-scope install is recommended for shared workflow.");
 	}
 
 	const ok = lines.every((line) => !line.includes("⚠️") && !line.includes("❌"));
 	return { ok, missingPrerequisites, message: lines.join("\n") };
+}
+
+function lastCommittedChangeDate(root: string, relativePath: string): string | undefined {
+	try {
+		return execFileSync("git", ["log", "-1", "--format=%cs", "--", relativePath], {
+			cwd: root,
+			encoding: "utf8",
+		}).trim() || undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+function trackedSourceFiles(root: string): string[] {
+	try {
+		return execFileSync("git", ["ls-files"], { cwd: root, encoding: "utf8" })
+			.split(/\r?\n/)
+			.filter(Boolean)
+			.filter((file) => isSourceFile(file, root));
+	} catch {
+		return [];
+	}
 }
 
 function changedFiles(): string[] {

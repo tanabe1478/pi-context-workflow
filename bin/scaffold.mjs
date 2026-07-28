@@ -2,21 +2,23 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
-import { languageSourceExtensions, normalizeExtensions, sourceExtensionsForLanguage } from '../src/workflow-core.mjs';
-
-const __filename = fileURLToPath(import.meta.url);
-const packageRoot = path.resolve(path.dirname(__filename), '..');
+import {
+  languageSourceExtensions,
+  normalizeExtensions,
+  normalizePackageSource,
+  packageSourceFromSetting,
+  sourceExtensionsForLanguage,
+} from '../src/workflow-core.mjs';
 
 function usage() {
   console.log(`pi-context-workflow scaffold
 
 Usage:
-  pi-context-workflow-scaffold [--root <project-root>] [--package-path <path>] [--language <name>] [--source-extensions <list>] [--force] [--dry-run]
+  pi-context-workflow-scaffold --package-source <source> [--root <project-root>] [--language <name>] [--source-extensions <list>] [--force] [--dry-run]
 
 Options:
   --root <path>                 Target project root. Defaults to git root or current directory.
-  --package-path <path>         Path added to .pi/settings.json packages. Defaults to this package root.
+  --package-source <source>     Required package source for .pi/settings.json. Git/npm sources are preserved; local paths become absolute.
   --language <name>             Required unless --source-extensions is specified. Supported: ${Object.keys(languageSourceExtensions).join(', ')}.
   --source-extensions <list>    Required unless --language is specified. Comma-separated source extensions, e.g. .ts,.tsx,.py. Overrides --language.
   --force                       Overwrite managed scaffold files when they already exist.
@@ -30,7 +32,7 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--root') args.root = argv[++i];
-    else if (arg === '--package-path') args.packagePath = argv[++i];
+    else if (arg === '--package-source') args.packageSource = argv[++i];
     else if (arg === '--language') args.language = argv[++i];
     else if (arg === '--source-extensions') args.sourceExtensions = argv[++i];
     else if (arg === '--force') args.force = true;
@@ -93,13 +95,16 @@ function writeJson(root, relativePath, value, dryRun) {
   if (!dryRun) fs.writeFileSync(full, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
 }
 
-function mergePiSettings(root, packagePath, dryRun) {
+function mergePiSettings(root, packageSource, dryRun) {
   const relativePath = path.join('.pi', 'settings.json');
   const full = path.join(root, relativePath);
   const settings = readJson(full, {});
   const packages = Array.isArray(settings.packages) ? settings.packages : [];
-  if (!packages.includes(packagePath)) packages.push(packagePath);
-  settings.packages = packages;
+  const retained = packages.filter((entry) => {
+    const source = packageSourceFromSetting(entry);
+    return source !== packageSource && !source?.includes('pi-context-workflow');
+  });
+  settings.packages = [...retained, packageSource];
   writeJson(root, relativePath, settings, dryRun);
 }
 
@@ -118,10 +123,10 @@ function resolveSourceExtensions(options) {
 }
 
 function scaffold(root, options) {
-  const packagePath = path.resolve(options.packagePath ?? packageRoot);
+  const packageSource = normalizePackageSource(options.packageSource, process.cwd());
   const sourceExtensions = resolveSourceExtensions(options);
 
-  mergePiSettings(root, packagePath, options.dryRun);
+  mergePiSettings(root, packageSource, options.dryRun);
 
   writeFile(root, path.join('.pi', 'metrics', '.gitignore'), '*\n!.gitignore\n', options);
 
@@ -132,6 +137,7 @@ function scaffold(root, options) {
   adr: {
     enabled: true,
     branchIgnorePatterns: ['^main$', '^master$', '^develop$'],
+    remindOnIgnoredBranchesForStrongSignals: true,
     strongSignals: [
       { name: 'architecture docs', patterns: ['^docs/architecture\\.md$', '^docs/.*/architecture.*\\.md$', '^docs/data-design\\.md$'] },
       { name: 'package/dependency changes', patterns: ['^Package\\.swift$', '^package\\.json$', '^pyproject\\.toml$', '^Cargo\\.toml$', '^go\\.mod$', '^pom\\.xml$', '^build\\.gradle', '^Gemfile$'] },
@@ -312,7 +318,7 @@ Proposed | Accepted | Superseded
 - 
 `, options);
 
-  return { root, packagePath, actions };
+  return { root, packageSource, actions };
 }
 
 try {
@@ -324,7 +330,7 @@ try {
   const root = path.resolve(args.root ?? defaultRoot());
   const result = scaffold(root, args);
   console.log(`pi-context-workflow scaffold target: ${result.root}`);
-  console.log(`package path: ${result.packagePath}`);
+  console.log(`package source: ${result.packageSource}`);
   for (const action of result.actions) console.log(`- ${action.type}: ${action.message}`);
   if (args.dryRun) console.log('dry-run: no files were written');
 } catch (error) {

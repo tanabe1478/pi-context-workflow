@@ -35,6 +35,26 @@ export function normalizeExtensions(extensions) {
   return [...new Set(extensions.map((ext) => ext.trim()).filter(Boolean).map((ext) => (ext.startsWith('.') ? ext : `.${ext}`)))];
 }
 
+export function isRemotePackageSource(source) {
+  return /^(npm:|git:|https?:\/\/|ssh:\/\/|git:\/\/)/i.test(source);
+}
+
+export function normalizePackageSource(source, cwd = process.cwd()) {
+  const value = String(source ?? '').trim();
+  if (!value) throw new Error('--package-source is required');
+  return isRemotePackageSource(value) ? value : path.resolve(cwd, value);
+}
+
+export function packageSourceFromSetting(entry) {
+  if (typeof entry === 'string') return entry;
+  if (entry && typeof entry === 'object' && typeof entry.source === 'string') return entry.source;
+  return undefined;
+}
+
+export function isStaleSpecDate(lastUpdated, committedDate) {
+  return Boolean(lastUpdated && committedDate && lastUpdated < committedDate);
+}
+
 export function sourceExtensionsFromConfig(config = {}) {
   const extensions = config.source?.extensions;
   if (!Array.isArray(extensions) || extensions.length === 0) {
@@ -83,6 +103,10 @@ export function tokenize(value) {
     .toLowerCase()
     .split(/[^a-z0-9]+/)
     .filter((token) => token.length >= 3 && !['swift', 'model', 'tests', 'test', 'create'].includes(token));
+}
+
+export function unmatchedSourceFiles(specs, sourceFiles, options = {}) {
+  return sourceFiles.filter((file) => matchingSpecs(specs, file, options).length === 0);
 }
 
 export function suggestSpecs(specs, filePath, options = {}) {
@@ -142,13 +166,14 @@ export function buildBugMemoryGate({ branch, changedFiles, changedSourceFiles = 
 
 export function buildAdrReminder({ branch, changedFiles, changedSourceFiles = [], reason, config = {} }) {
   if (config.adr?.enabled === false) return undefined;
-  if (isIgnoredAdrBranch(branch, config)) return undefined;
   if (changedFiles.length === 0) return undefined;
 
   const rules = config.adr?.strongSignals ?? defaultAdrStrongSignals;
   const matchedSignals = rules
     .filter((rule) => changedFiles.some((file) => matchesAnyPattern(file, rule.patterns)))
     .map((rule) => rule.name);
+  const ignoredBranch = isIgnoredAdrBranch(branch, config);
+  if (ignoredBranch && !(config.adr?.remindOnIgnoredBranchesForStrongSignals && matchedSignals.length > 0)) return undefined;
   const strength = matchedSignals.length > 0 ? `特に ${matchedSignals.join(', ')} に関わる変更があります。` : '';
   const message = `[ADR Reminder] branch ${branch} で作業中です。重要な設計判断・トレードオフ・将来の制約があるなら docs/adr/ADR-XXX-title.md を作成してください。${strength} spec 更新で十分な変更なら ADR 不要と判断して進めてください。`;
 

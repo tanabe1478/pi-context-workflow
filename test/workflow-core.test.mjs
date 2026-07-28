@@ -5,14 +5,19 @@ import {
   buildBugMemoryGate,
   changedBugDetailFiles,
   isBugfixBranch,
+  isRemotePackageSource,
+  isStaleSpecDate,
   isSourceFile,
   matchingSpecs,
   matchesAnyPattern,
+  normalizePackageSource,
+  packageSourceFromSetting,
   sourceExtensionsFromConfig,
   sourceExtensionsForLanguage,
   sourceSpecs,
   suggestSpecs,
   tokenize,
+  unmatchedSourceFiles,
 } from '../src/workflow-core.mjs';
 
 const specs = [
@@ -41,6 +46,25 @@ const specs = [
     lastUpdated: undefined,
   },
 ];
+
+test('package sources preserve remote specs and resolve local paths', () => {
+  assert.equal(isRemotePackageSource('git:github.com/example/workflow'), true);
+  assert.equal(isRemotePackageSource('npm:pi-context-workflow'), true);
+  assert.equal(normalizePackageSource('git:github.com/example/workflow', '/project'), 'git:github.com/example/workflow');
+  assert.equal(normalizePackageSource('./workflow', '/project'), '/project/workflow');
+  assert.throws(() => normalizePackageSource('', '/project'), /--package-source is required/);
+  assert.equal(packageSourceFromSetting({ source: 'git:github.com/example/workflow' }), 'git:github.com/example/workflow');
+  assert.equal(packageSourceFromSetting({ extensions: [] }), undefined);
+});
+
+test('spec audit detects stale dates and unmatched tracked sources', () => {
+  assert.equal(isStaleSpecDate('2026-07-19', '2026-07-24'), true);
+  assert.equal(isStaleSpecDate('2026-07-24', '2026-07-24'), false);
+  assert.deepEqual(
+    unmatchedSourceFiles(specs, ['Sources/App/Domain/User/User.swift', 'Sources/App/routes.swift']),
+    ['Sources/App/routes.swift'],
+  );
+});
 
 test('source extension config supports non-Swift projects', () => {
   assert.throws(() => sourceExtensionsFromConfig({}), /source\.extensions is required/);
@@ -175,6 +199,27 @@ test('buildAdrReminder is advisory on non-main branches and ignores main', () =>
   assert.ok(reminder);
   assert.match(reminder.message, /ADR Reminder/);
   assert.deepEqual(reminder.matchedSignals, ['package/dependency changes']);
+});
+
+test('buildAdrReminder can remind on an ignored trunk branch for strong signals', () => {
+  const reminder = buildAdrReminder({
+    branch: 'master',
+    changedFiles: ['migrations/0028_add_audit_log.sql'],
+    reason: 'before_commit',
+    config: { adr: { remindOnIgnoredBranchesForStrongSignals: true } },
+  });
+
+  assert.ok(reminder);
+  assert.deepEqual(reminder.matchedSignals, ['migration changes']);
+  assert.equal(
+    buildAdrReminder({
+      branch: 'master',
+      changedFiles: ['src/frontend/Button.tsx'],
+      reason: 'before_commit',
+      config: { adr: { remindOnIgnoredBranchesForStrongSignals: true } },
+    }),
+    undefined,
+  );
 });
 
 test('buildAdrReminder uses project-configured strong signals', () => {

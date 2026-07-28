@@ -1,6 +1,6 @@
 {
   "name": "pi-context-workflow",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Project documentation/spec workflow reminders and metrics for pi coding agent.",
   "keywords": ["pi-package", "pi", "context-engineering", "spec-workflow", "documentation"],
   "license": "MIT",

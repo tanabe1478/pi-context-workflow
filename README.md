@@ -69,17 +69,23 @@ When a changed source file has no matching trigger, the extension uses a lightwe
 
 ### Scaffold recommended files
 
-From any target project root, run with an explicit language or source extension list:
+From any target project root, run with an explicit package source and language or source extension list. For a shared project, prefer an unpinned Git source so `pi update --extensions` can update it:
 
 ```bash
-node /absolute/path/to/pi-context-workflow/bin/scaffold.mjs --language typescript
+node /absolute/path/to/pi-context-workflow/bin/scaffold.mjs \
+  --package-source git:github.com/tanabe1478/pi-context-workflow \
+  --language typescript
 ```
 
 Or, when installed as a package/bin:
 
 ```bash
-pi-context-workflow-scaffold --language typescript
+pi-context-workflow-scaffold \
+  --package-source git:github.com/tanabe1478/pi-context-workflow \
+  --language typescript
 ```
+
+`--package-source` is required. Git/npm sources are preserved exactly; local paths are converted to absolute paths and are therefore suitable only for machine-local dogfooding. Re-running scaffold replaces an older `pi-context-workflow` source instead of loading the extension twice.
 
 The scaffold deterministically creates or updates:
 
@@ -98,29 +104,33 @@ docs/adr/README.md
 It does not overwrite existing managed docs by default. Use `--force` to overwrite and `--dry-run` to preview:
 
 ```bash
-pi-context-workflow-scaffold --root /path/to/project --language swift --dry-run
-pi-context-workflow-scaffold --root /path/to/project --language typescript --package-path /path/to/pi-context-workflow
-pi-context-workflow-scaffold --root /path/to/project --language python
-pi-context-workflow-scaffold --root /path/to/project --source-extensions .ts,.tsx,.py
+pi-context-workflow-scaffold --root /path/to/project --package-source git:github.com/tanabe1478/pi-context-workflow --language swift --dry-run
+pi-context-workflow-scaffold --root /path/to/project --package-source /path/to/pi-context-workflow --language typescript
+pi-context-workflow-scaffold --root /path/to/project --package-source git:github.com/tanabe1478/pi-context-workflow --language python
+pi-context-workflow-scaffold --root /path/to/project --package-source git:github.com/tanabe1478/pi-context-workflow --source-extensions .ts,.tsx,.py
 ```
 
 ### Manual install
 
-From a project root:
+From a project root, use a portable Git source for a shared project:
 
 ```bash
-pi install -l /absolute/path/to/pi-context-workflow
+pi install -l git:github.com/tanabe1478/pi-context-workflow
 ```
 
-Or add to `.pi/settings.json` manually:
+Or add it to `.pi/settings.json` manually:
 
 ```json
 {
-  "packages": ["/absolute/path/to/pi-context-workflow"]
+  "packages": ["git:github.com/tanabe1478/pi-context-workflow"]
 }
 ```
 
-Then run `/reload` in pi.
+Use an absolute local path only for machine-local development. Then run `/reload` in pi. Package updates are explicit:
+
+```bash
+pi update --extensions
+```
 
 ## Pull request template
 
@@ -154,8 +164,10 @@ It checks:
 - Git repository root can be detected
 - suggested baseline docs exist, or are consciously unnecessary
 - spec files, excluding `docs/specs/README.md`, have `> Trigger:` and `> Last updated:` headers
+- `> Last updated:` values are not older than the last Git commit touching each spec
+- tracked source files without a matching spec Trigger are reported as advisory coverage information
 - metrics directory is writable
-- `.pi/settings.json` exists for project-scope usage
+- `.pi/settings.json` exists and its pi-context-workflow source is portable or locally resolvable
 
 ## Bug memory
 
@@ -196,6 +208,7 @@ Example:
   "adr": {
     "enabled": true,
     "branchIgnorePatterns": ["^main$", "^master$", "^develop$"],
+    "remindOnIgnoredBranchesForStrongSignals": true,
     "strongSignals": [
       { "name": "architecture docs", "patterns": ["^docs/architecture\\.md$", "^docs/data-design\\.md$"] },
       { "name": "package/dependency changes", "patterns": ["^Package\\.swift$"] },
@@ -226,7 +239,8 @@ Covered areas include:
 - scaffold file creation / merge / dry-run behavior
 - spec trigger matching and candidate suggestions
 - bug memory gate conditions
-- ADR reminder strong-signal matching
+- ADR reminder strong-signal matching, including trunk branches when explicitly enabled
+- portable Git/npm package source preservation
 - project config overrides
 
 ## Metrics
@@ -252,5 +266,6 @@ Current defaults:
 - specs directory: `docs/specs`
 - bug memory index: `docs/specs/bug-memory.md`
 - bug detail directory: `docs/specs/bugs`
-- optional project config: `.pi/context-workflow.json`
+- project config: `.pi/context-workflow.json`
+- ADRs: ignored branches stay quiet by default; scaffold enables reminders there only for strong signals
 - metrics file: `.pi/metrics/context-workflow.jsonl`
